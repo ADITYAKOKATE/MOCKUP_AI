@@ -1,0 +1,7 @@
+requests
+beautifulsoup4
+pymongo
+python-dotenv
+lxml
+gpt4all
+huggingface_hub
