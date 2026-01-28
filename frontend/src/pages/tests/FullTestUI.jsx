@@ -3,6 +3,7 @@ import TestTopbar from './components/TestTopbar.jsx';
 import QuestionCard from './components/QuestionCard.jsx';
 import TestBottomBar from './components/TestBottomBar.jsx';
 import TestSidebar from './components/TestSidebar.jsx';
+import QuitModal from './components/QuitModal.jsx';
 
 const FullTestUI = ({
     questions,
@@ -13,8 +14,12 @@ const FullTestUI = ({
     timeLeft,
     onMarkForReview,
     onClearResponse,
-    onSubmit
+
+    onSubmit,
+    onDiscard
 }) => {
+    const [isQuitModalOpen, setIsQuitModalOpen] = React.useState(false);
+
     const currentQuestion = questions[currentQuestionIndex];
     const currentResponse = responses[currentQuestion.id]?.answer;
     const isMarked = responses[currentQuestion.id]?.marked;
@@ -32,16 +37,18 @@ const FullTestUI = ({
                     timeLeft={timeLeft}
                     currentQ={currentQuestionIndex}
                     totalQ={questions.length}
-                    onQuit={onSubmit}
+
+                    onQuit={() => setIsQuitModalOpen(true)}
+                    onSubmit={onSubmit}
                 />
             </div>
-            
+
             {/* Main Content Grid */}
             <div className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 overflow-hidden pt-6">
-                
+
                 {/* Left Column: Questions Area + Bottom Bar */}
                 <div className="flex flex-col h-full overflow-hidden gap-6">
-                    
+
                     {/* Scrollable Question Container */}
                     <div className="flex-1 overflow-y-auto rounded-2xl custom-scrollbar">
                         <QuestionCard
@@ -54,7 +61,7 @@ const FullTestUI = ({
 
                     {/* Bottom Bar - Fixed at bottom of Left Column */}
                     <div className="flex-shrink-0">
-                        <TestBottomBar 
+                        <TestBottomBar
                             currentQ={currentQuestionIndex}
                             totalQ={questions.length}
                             onPrev={() => onQuestionChange(currentQuestionIndex - 1)}
@@ -70,7 +77,7 @@ const FullTestUI = ({
                 {/* Right Column: Sidebar (Desktop Only) */}
                 <div className="hidden lg:block h-full overflow-hidden">
                     <div className="h-full rounded-2xl overflow-hidden shadow-xl border border-gray-200 bg-white">
-                        <TestSidebar 
+                        <TestSidebar
                             questions={questions}
                             currentQuestionIndex={currentQuestionIndex}
                             onQuestionChange={onQuestionChange}
@@ -80,6 +87,15 @@ const FullTestUI = ({
                 </div>
 
             </div>
+            {/* Quit Options Modal */}
+            <QuitModal
+                isOpen={isQuitModalOpen}
+                onClose={() => setIsQuitModalOpen(false)}
+                onResume={() => setIsQuitModalOpen(false)}
+                onDiscard={onDiscard}
+                onSubmit={onSubmit}
+            />
+
         </div>
     );
 };

@@ -2,6 +2,7 @@ import React from 'react';
 import TestTopbar from './components/TestTopbar.jsx';
 import QuestionCard from './components/QuestionCard.jsx';
 import TestBottomBar from './components/TestBottomBar.jsx';
+import QuitModal from './components/QuitModal.jsx';
 
 const ShortTestUI = ({
     questions,
@@ -11,8 +12,12 @@ const ShortTestUI = ({
     onAnswer,
     timeLeft,
     onMarkForReview,
-    onSubmit
+
+    onSubmit,
+    onDiscard
 }) => {
+    const [isQuitModalOpen, setIsQuitModalOpen] = React.useState(false);
+
     const currentQuestion = questions[currentQuestionIndex];
     const currentResponse = responses[currentQuestion.id]?.answer;
     const isMarked = responses[currentQuestion.id]?.marked;
@@ -26,19 +31,21 @@ const ShortTestUI = ({
         <div className="h-full w-full bg-gray-50 flex flex-col overflow-hidden">
             {/* Top Bar - Fixed */}
             <div className="flex-shrink-0 z-50">
-                <TestTopbar 
+                <TestTopbar
                     title="Short Quiz"
                     timeLeft={timeLeft}
                     currentQ={currentQuestionIndex}
                     totalQ={questions.length}
-                    onQuit={onSubmit} 
+
+                    onQuit={() => setIsQuitModalOpen(true)}
+                    onSubmit={onSubmit}
                 />
             </div>
 
             {/* Middle - Scrollable Question Area */}
             <div className="flex-1 overflow-y-auto pb-4 pt-6">
                 <div className="max-w-3xl mx-auto w-full h-full flex flex-col">
-                    <QuestionCard 
+                    <QuestionCard
                         question={currentQuestion}
                         response={currentResponse}
                         onAnswer={handleAnswer}
@@ -50,17 +57,25 @@ const ShortTestUI = ({
             {/* Bottom Bar - Fixed */}
             <div className="flex-shrink-0 z-40 pt-2">
                 <div className="w-full">
-                    <TestBottomBar 
+                    <TestBottomBar
                         currentQ={currentQuestionIndex}
                         totalQ={questions.length}
                         onPrev={() => onQuestionChange(currentQuestionIndex - 1)}
                         onNext={() => currentQuestionIndex === questions.length - 1 ? onSubmit() : onQuestionChange(currentQuestionIndex + 1)}
                         onMark={() => onMarkForReview(currentQuestion.id)}
                         isMarked={isMarked}
-                        onQuit={onSubmit}
+                        onQuit={() => setIsQuitModalOpen(true)}
                     />
                 </div>
             </div>
+            {/* Quit Options Modal */}
+            <QuitModal
+                isOpen={isQuitModalOpen}
+                onClose={() => setIsQuitModalOpen(false)}
+                onResume={() => setIsQuitModalOpen(false)}
+                onDiscard={onDiscard}
+                onSubmit={onSubmit}
+            />
         </div>
     );
 };

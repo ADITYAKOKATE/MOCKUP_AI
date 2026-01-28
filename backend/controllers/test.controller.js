@@ -3,6 +3,7 @@ const Attempt = require('../models/Attempt');
 const ExamPattern = require('../models/ExamPattern');
 const Question = require('../models/Question');
 const Performance = require('../models/Performance');
+const { BRANCHES } = require('../utils/constants');
 
 /**
  * Start a full length test
@@ -717,19 +718,36 @@ exports.getUserAttempts = async (req, res) => {
                         const typeMatch = e.examType.toLowerCase() === normalizedExam.toLowerCase();
                         if (typeMatch) return true;
                         if (e.branch) {
-                            return `${e.examType} ${e.branch}`.toLowerCase() === normalizedExam.toLowerCase();
+                            const fullMatch = `${e.examType} ${e.branch}`.toLowerCase() === normalizedExam.toLowerCase();
+                            if (fullMatch) return true;
+
+                            // Also check full branch name match
+                            const fullBranchName = BRANCHES[e.branch];
+                            if (fullBranchName) {
+                                const fullNameMatch = `${e.examType} ${fullBranchName}`.toLowerCase() === normalizedExam.toLowerCase();
+                                if (fullNameMatch) return true;
+                            }
                         }
                         return false;
                     });
+
                     if (matchingExam) {
-                        searchExam = matchingExam.examType;
+                        searchExam = matchingExam.examType; // "GATE"
+
+                        // Critical parsing for specific branch filtering
+                        if (matchingExam.examType === 'GATE' && matchingExam.branch) {
+                            // If a specific branch is selected, DO NOT default to broad "^GATE" regex.
+                            // Instead, construct specific regex "^GATE DA"
+                            searchExam = `GATE ${matchingExam.branch}`;
+                            console.log(`[History] Refining filter for GATE branch: ${searchExam}`);
+                        }
                     }
                 }
             } catch (err) {
                 console.error('Error resolving exam type in history:', err);
             }
 
-            // Use prefix match to handle variations (e.g. "GATE" should match "gate-cs", "GATE CS")
+            // Use prefix match to handle variations
             filter.examType = { $regex: new RegExp(`^${searchExam}`, 'i') };
         }
 

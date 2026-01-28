@@ -1,6 +1,7 @@
 const Attempt = require('../models/Attempt');
 const Performance = require('../models/Performance');
 const UserProfile = require('../models/UserProfile');
+const { BRANCHES } = require('../utils/constants');
 
 /**
  * Get comprehensive dashboard data
@@ -22,43 +23,108 @@ exports.getDashboardData = async (req, res) => {
 
         // Use exam from query parameter, or default to first exam
         let selectedExam;
+        let selectedBranch = null;
+
         if (exam) {
             // Normalize exam parameter (handle "jee-main" format)
             const normalizedExam = exam.replace(/-/g, ' ');
-            // Find matching exam in user's profile (case-insensitive)
+
+            console.log(`[Dashboard Debug] Exam Query: ${exam}`);
+            console.log(`[Dashboard Debug] Normalized: ${normalizedExam}`);
+
             // Find matching exam in user's profile (case-insensitive)
             // Handle both "examType" and "examType branch" formats
+            // Find matching exam in user's profile (case-insensitive)
+            // Handle "examType", "examType branchCode", AND "examType branchFullName" formats
             const matchingExam = userProfile.exams.find(e => {
+                // 1. Direct Type Match (e.g. "JEE Main")
                 const typeMatch = e.examType.toLowerCase() === normalizedExam.toLowerCase();
                 if (typeMatch) return true;
 
                 if (e.branch) {
-                    const fullMatch = `${e.examType} ${e.branch}`.toLowerCase() === normalizedExam.toLowerCase();
-                    if (fullMatch) return true;
+                    // 2. Code Match (e.g. "GATE DA" === "gate da")
+                    const codeMatch = `${e.examType} ${e.branch}`.toLowerCase() === normalizedExam.toLowerCase();
+                    if (codeMatch) return true;
+
+                    // 3. Full Name Match (e.g. "GATE Data Science..." === "gate data science...")
+                    // Resolve branch code to full name using BRANCHES
+                    const fullBranchName = BRANCHES[e.branch];
+                    if (fullBranchName) {
+                        const fullNameMatch = `${e.examType} ${fullBranchName}`.toLowerCase() === normalizedExam.toLowerCase();
+                        if (fullNameMatch) return true;
+                    }
                 }
                 return false;
             });
-            selectedExam = matchingExam ? matchingExam.examType : userProfile.exams[0].examType;
+
+            console.log(`[Dashboard Debug] Match result:`, matchingExam ? `${matchingExam.examType} - ${matchingExam.branch}` : 'None');
+
+            if (matchingExam) {
+                selectedExam = matchingExam.examType;
+                selectedBranch = matchingExam.branch;
+            } else {
+                console.log('[Dashboard Debug] No match found, defaulting to first exam');
+                selectedExam = userProfile.exams[0].examType;
+                selectedBranch = userProfile.exams[0].branch;
+            }
         } else {
             selectedExam = userProfile.exams[0].examType;
+            selectedBranch = userProfile.exams[0].branch;
         }
 
-        console.log(`[Dashboard] Fetching data for exam: ${selectedExam}`);
+        console.log(`[Dashboard] Fetching data for exam: ${selectedExam} ${selectedBranch ? '(' + selectedBranch + ')' : ''}`);
+
+        // Construct query for attempts
+        // If GATE and has branch, we must be specific to avoid mixing CS/DA/etc.
+        let attemptQueryRegex = `^${selectedExam}`;
+
+        if (selectedExam === 'GATE' && selectedBranch) {
+            // Resolve branch code for attempt query
+            let branchCode = selectedBranch;
+            const entry = Object.entries(BRANCHES).find(([key, val]) => val.toLowerCase() === selectedBranch.toLowerCase());
+            if (entry) branchCode = entry[0];
+
+            // Escape special chars if any, though GATE DA is safe
+            attemptQueryRegex = `^GATE ${branchCode}`;
+            console.log(`[Dashboard] Refined attempt query for GATE: ${attemptQueryRegex}`);
+        } else {
+            // For others, prefix match is fine? (e.g. JEE Main)
+            // Maybe default to exact match if not GATE?
+            // But existing code used prefix. keeping it safe.
+            attemptQueryRegex = `^${selectedExam}`;
+        }
 
         // Fetch attempts for this specific exam
         // Use prefix match to handle variations (e.g. "GATE" matches "gate-cs")
         const attempts = await Attempt.find({
             userId,
-            examType: { $regex: new RegExp(`^${selectedExam}`, 'i') }
+            examType: { $regex: new RegExp(attemptQueryRegex, 'i') }
         })
             .sort({ createdAt: -1 })
             .limit(20);
 
         // Normalize for Performance lookup to prevent mismatch/rebuild loops
         let performanceExamName = selectedExam;
-        if (performanceExamName === 'GATE') performanceExamName = 'GATE CS';
-        if (performanceExamName === 'gate-cs') performanceExamName = 'GATE CS';
-        if (performanceExamName === 'jee-main') performanceExamName = 'JEE Main';
+
+        // Handle GATE specific normalization with branch
+        if (performanceExamName === 'GATE') {
+            if (selectedBranch) {
+                // Try to resolve full branch name to code (e.g. "Data Science..." -> "DA")
+                // Check if it's already a code or needs lookup
+                let branchCode = selectedBranch;
+                // Reverse lookup in BRANCHES values
+                const entry = Object.entries(BRANCHES).find(([key, val]) => val === selectedBranch);
+                if (entry) branchCode = entry[0];
+
+                performanceExamName = `GATE ${branchCode}`;
+            } else {
+                performanceExamName = 'GATE CS'; // Default if no branch found
+            }
+        } else if (performanceExamName === 'gate-cs') {
+            performanceExamName = 'GATE CS';
+        } else if (performanceExamName === 'jee-main') {
+            performanceExamName = 'JEE Main';
+        }
 
         // Fetch performance data
         let performance = await Performance.findOne({ userId });
@@ -97,7 +163,7 @@ exports.getDashboardData = async (req, res) => {
         // Calculate dashboard metrics
         const dashboardData = {
             hasProfile: true,
-            selectedExam,
+            selectedExam: selectedBranch ? `${selectedExam} ${selectedBranch}` : selectedExam,
 
             // Overall Stats
             stats: {

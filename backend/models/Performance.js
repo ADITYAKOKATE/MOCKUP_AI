@@ -9,6 +9,10 @@ const performanceSchema = new mongoose.Schema({
         unique: true,
         index: true
     },
+    name: {
+        type: String,
+        trim: true
+    },
     // Map of Exams (Key: Exam Name, e.g., "JEE Main")
     exams: {
         type: Map,
@@ -280,7 +284,7 @@ performanceSchema.statics.updatePerformance = async function (userId, examName, 
      * @param {ObjectId} userId - User ID
      * @param {string} examName - Name of the exam (e.g., "JEE Main")
      */
-performanceSchema.statics.initializeExamPerformance = async function (userId, examName) {
+performanceSchema.statics.initializeExamPerformance = async function (userId, examName, userName = null) {
     try {
         // Normalize
         if (examName === 'GATE') examName = 'GATE CS';
@@ -297,7 +301,10 @@ performanceSchema.statics.initializeExamPerformance = async function (userId, ex
         // Find or create performance document
         let perf = await this.findOne({ userId });
         if (!perf) {
-            perf = await this.create({ userId, exams: new Map() });
+            perf = await this.create({ userId, name: userName, exams: new Map() });
+        } else if (userName && !perf.name) {
+            // Backfill name if missing
+            perf.name = userName;
         }
 
         // Check if exam already initialized
@@ -559,12 +566,13 @@ performanceSchema.statics.getWeakTopics = async function (userId, examName, thre
  * Initialize performance for multiple exams
  * @param {ObjectId} userId - User ID
  * @param {Array<string>} examNames - Array of exam names
+ * @param {string} userName - User name
  */
-performanceSchema.statics.initializeMultipleExams = async function (userId, examNames) {
+performanceSchema.statics.initializeMultipleExams = async function (userId, examNames, userName = null) {
     try {
         const results = [];
         for (const examName of examNames) {
-            const result = await this.initializeExamPerformance(userId, examName);
+            const result = await this.initializeExamPerformance(userId, examName, userName);
             results.push({ examName, success: !!result });
         }
         return results;

@@ -156,6 +156,32 @@ const Tests = () => {
             setTestMode(null);
         } finally {
             setLoading(false);
+            setLoading(false);
+        }
+    };
+
+    // Handle Discard Active Session (from Quit Modal)
+    const handleDiscardSession = async () => {
+        if (!sessionId) {
+            // If local mock test
+            setTestMode(null);
+            setQuestions([]);
+            return;
+        }
+
+        try {
+            setLoading(true);
+            await api.discardSession(sessionId);
+            toast.success('Test attempt discarded');
+            setTestMode(null);
+            setSessionId(null);
+            setQuestions([]);
+            setIsActive(false);
+        } catch (error) {
+            console.error('Failed to discard session:', error);
+            toast.error('Failed to discard session');
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -603,6 +629,7 @@ const Tests = () => {
         onMarkForReview: handleMarkForReview,
         onClearResponse: handleClearResponse,
         onSubmit: handleSubmit,
+        onDiscard: handleDiscardSession,
         sessionId,
         testMode
     };
