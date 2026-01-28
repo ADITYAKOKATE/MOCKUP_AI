@@ -20,5 +20,21 @@ export const aiService = {
             console.error('Error fetching AI recommendations:', error);
             throw error.response?.data || error;
         }
+    },
+
+    /**
+     * Get AI explanation for a question
+     */
+    explainQuestion: async (data) => {
+        try {
+            const token = localStorage.getItem('token');
+            const response = await axios.post(`${API_URL}/ai/explain-question`, data, {
+                headers: { 'x-auth-token': token }
+            });
+            return response.data;
+        } catch (error) {
+            console.error('Error fetching AI explanation:', error);
+            throw error.response?.data || error;
+        }
     }
 };

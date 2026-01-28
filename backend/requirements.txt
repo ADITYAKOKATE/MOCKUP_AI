@@ -5,3 +5,6 @@ python-dotenv
 lxml
 gpt4all
 huggingface_hub
+fastapi
+uvicorn
+pydantic

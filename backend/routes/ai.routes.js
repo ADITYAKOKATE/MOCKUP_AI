@@ -8,6 +8,11 @@ const auth = require('../middleware/auth');
 // @access  Private (requires authentication)
 router.get('/recommendations', auth, aiController.getAIRecommendations);
 
+// @route   POST /api/ai/explain-question
+// @desc    Get AI-generated explanation for a question
+// @access  Private
+router.post('/explain-question', auth, aiController.getQuestionExplanation);
+
 module.exports = router;
 
 

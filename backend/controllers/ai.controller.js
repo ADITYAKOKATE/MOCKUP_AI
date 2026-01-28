@@ -224,3 +224,40 @@ exports.getAIRecommendations = async (req, res) => {
         res.status(500).json({ message: 'Server error while fetching recommendations' });
     }
 };
+
+/**
+ * Get AI explanation for a specific question
+ * POST /api/ai/explain-question
+ */
+exports.getQuestionExplanation = async (req, res) => {
+    try {
+        const { question, userAnswer, correctAnswer, staticExplanation, timeTaken } = req.body;
+
+        // Call Python AI Service
+        const aiResponse = await fetch('http://127.0.0.1:5001/explain', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                question,
+                user_answer: userAnswer,
+                correct_answer: correctAnswer,
+                static_explanation: staticExplanation,
+                time_taken: timeTaken
+            })
+        });
+
+        if (!aiResponse.ok) {
+            throw new Error('AI Service unavailable');
+        }
+
+        const data = await aiResponse.json();
+        res.json(data);
+
+    } catch (error) {
+        console.error('Error fetching AI explanation:', error);
+        res.status(503).json({
+            message: 'AI Service currently unavailable',
+            fallback: staticExplanation
+        });
+    }
+};

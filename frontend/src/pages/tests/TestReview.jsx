@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../../services/api';
+import { aiService } from '../../services/ai.service';
 import { ArrowLeft, CheckCircle, XCircle, AlertCircle, Bookmark, ChevronRight, ChevronLeft, Flag, Zap, Clock } from 'lucide-react';
 import QuestionRenderer from './components/QuestionRenderer';
 
@@ -11,6 +12,34 @@ const TestReview = () => {
     const [questions, setQuestions] = useState([]);
     const [currentIndex, setCurrentIndex] = useState(0);
     const [loading, setLoading] = useState(true);
+    const [generatingAI, setGeneratingAI] = useState(false);
+
+    const handleExplainWithAI = async () => {
+        if (!currentQuestion) return;
+        setGeneratingAI(true);
+        try {
+            const data = await api.explainQuestion({
+                question: currentQuestion.questionText,
+                userAnswer: currentQuestion.userAnswer,
+                correctAnswer: currentQuestion.correctAnswer,
+                staticExplanation: currentQuestion.explanation,
+                timeTaken: currentQuestion.timeTaken
+            });
+
+            // Update local state to show explanation
+            const updatedQuestions = [...questions];
+            updatedQuestions[currentIndex] = {
+                ...updatedQuestions[currentIndex],
+                aiExplanation: data.explanation
+            };
+            setQuestions(updatedQuestions);
+        } catch (error) {
+            console.error("Failed to generate AI explanation", error);
+            // Optionally show toast error
+        } finally {
+            setGeneratingAI(false);
+        }
+    };
 
     useEffect(() => {
         const fetchAttempt = async () => {
@@ -222,18 +251,51 @@ const TestReview = () => {
                                 <Zap size={120} className="text-blue-600" />
                             </div>
 
-                            <h3 className="text-blue-900 font-black text-lg flex items-center gap-2 mb-4 relative z-10">
-                                <div className="p-2 bg-blue-100 rounded-lg text-blue-600">
-                                    <Bookmark size={20} className="fill-current" />
-                                </div>
-                                Solution & Concept
-                            </h3>
+                            <div className="flex justify-between items-start relative z-10 mb-4">
+                                <h3 className="text-blue-900 font-black text-lg flex items-center gap-2">
+                                    <div className="p-2 bg-blue-100 rounded-lg text-blue-600">
+                                        <Bookmark size={20} className="fill-current" />
+                                    </div>
+                                    Solution & Concept
+                                </h3>
+
+                                {!currentQuestion.aiExplanation && (
+                                    <button
+                                        onClick={handleExplainWithAI}
+                                        disabled={generatingAI}
+                                        className="flex items-center gap-2 px-4 py-2 bg-white text-blue-600 rounded-xl text-sm font-bold shadow-sm border border-blue-100 hover:bg-blue-50 transition-colors disabled:opacity-50"
+                                    >
+                                        {generatingAI ? (
+                                            <>
+                                                <div className="animate-spin rounded-full h-4 w-4 border-2 border-blue-600 border-t-transparent"></div>
+                                                Thinking...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Zap size={16} className="fill-current" />
+                                                Explain with AI
+                                            </>
+                                        )}
+                                    </button>
+                                )}
+                            </div>
 
                             <div className="prose prose-blue max-w-none relative z-10">
                                 <p className="text-blue-800 leading-relaxed font-medium">
-                                    The correct answer is derived by analyzing the fundamental principles...
-                                    (This is a placeholder for the detailed step-by-step solution provided by our expert faculty. In the production version, this would contain LaTeX formatted equations and diagrams.)
+                                    <QuestionRenderer content={currentQuestion.explanation || "No explanation provided for this question."} />
                                 </p>
+
+                                {currentQuestion.aiExplanation && (
+                                    <div className="mt-6 p-6 bg-white/80 backdrop-blur-sm rounded-2xl border border-blue-100 shadow-sm animate-in fade-in slide-in-from-bottom-4">
+                                        <div className="flex items-center gap-2 mb-2 text-blue-700 font-bold text-sm uppercase tracking-wider">
+                                            <Zap size={16} className="fill-current" />
+                                            AI Tutor Feedback
+                                        </div>
+                                        <div className="text-gray-800 leading-relaxed">
+                                            <QuestionRenderer content={currentQuestion.aiExplanation} />
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
 

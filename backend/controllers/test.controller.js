@@ -361,7 +361,26 @@ exports.getTestResults = async (req, res) => {
             return res.status(404).json({ message: 'Test results not found' });
         }
 
-        res.json(attempt);
+        // Fetch explanations for all questions in the attempt
+        const questionIds = attempt.questions.map(q => q.questionId);
+        const questionsWithExplanation = await Question.find({ _id: { $in: questionIds } })
+            .select('_id explanation');
+
+        const explanationMap = {};
+        questionsWithExplanation.forEach(q => {
+            explanationMap[q._id.toString()] = q.explanation;
+        });
+
+        // Convert attempt document to plain object to modify it
+        const attemptObj = attempt.toObject();
+
+        // Attach explanation to each question
+        attemptObj.questions = attemptObj.questions.map(q => ({
+            ...q,
+            explanation: explanationMap[q.questionId.toString()] || null
+        }));
+
+        res.json(attemptObj);
 
     } catch (error) {
         console.error('Error fetching test results:', error);
