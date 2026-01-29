@@ -17,11 +17,15 @@ const attemptSchema = new mongoose.Schema({
     },
     testType: {
         type: String,
-        enum: ['Full', 'Subject', 'Random', 'AI', 'Topic', 'Revision'],
+        enum: ['Full', 'Subject', 'Random', 'AI', 'Topic', 'Revision', 'topic-wise'], // Added topic-wise
         required: true
     },
     subject: {
         type: String,
+        default: null
+    },
+    topic: {
+        type: String, // For topic-wise tests
         default: null
     },
 
@@ -100,16 +104,7 @@ const attemptSchema = new mongoose.Schema({
     // Subject-wise breakdown
     subjectWise: {
         type: Map,
-        of: new mongoose.Schema({
-            attempted: Number,
-            correct: Number,
-            wrong: Number,
-            unattempted: Number,
-            score: Number,
-            maxScore: Number,
-            accuracy: Number,
-            timeTaken: Number
-        }, { _id: false })
+        of: Object // Simplified to avoid Schema complexity issues
     },
 
     // Time tracking

@@ -1,7 +1,7 @@
 import React from 'react';
 import { PlayCircle, Trash2, CheckCircle, X, AlertTriangle } from 'lucide-react';
 
-const QuitModal = ({ isOpen, onClose, onResume, onDiscard, onSubmit }) => {
+const QuitModal = ({ isOpen, onClose, onResume, onDiscard, onSaveAndExit }) => {
     if (!isOpen) return null;
 
     return (
@@ -23,7 +23,7 @@ const QuitModal = ({ isOpen, onClose, onResume, onDiscard, onSubmit }) => {
 
                     <h3 className="text-xl font-bold text-gray-900 mb-2">Pause / Quit Test</h3>
                     <p className="text-gray-500 mb-6 text-sm">
-                        What would you like to do? You can resume later (if active), discard this attempt, or submit now.
+                        What would you like to do? You can resume later (if active), discard this attempt, or save and finish later.
                     </p>
 
                     <div className="grid grid-cols-1 gap-3 w-full">
@@ -36,13 +36,13 @@ const QuitModal = ({ isOpen, onClose, onResume, onDiscard, onSubmit }) => {
                             Resume Test
                         </button>
 
-                        {/* Submit */}
+                        {/* Save & Finish Later */}
                         <button
-                            onClick={onSubmit}
+                            onClick={onSaveAndExit}
                             className="w-full py-3 bg-white hover:bg-green-50 text-green-700 border border-green-200 hover:border-green-300 rounded-xl font-bold transition-all active:scale-95 flex items-center justify-center gap-2"
                         >
                             <CheckCircle size={18} />
-                            Submit & Finish
+                            Save & Finish Later
                         </button>
 
                         {/* Discard */}

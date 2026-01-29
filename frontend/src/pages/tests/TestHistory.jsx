@@ -105,7 +105,7 @@ const TestHistory = () => {
                                     <div className="flex justify-between items-start mb-6">
                                         <div>
                                             <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold bg-gray-100 text-gray-600 mb-2">
-                                                {attempt.examType}
+                                                {attempt.testType === 'topic-wise' && attempt.topic ? `Topic: ${attempt.topic}` : attempt.examType}
                                             </span>
                                             <div className="flex items-center gap-2 text-gray-400 text-sm font-medium">
                                                 <Calendar size={14} />

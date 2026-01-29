@@ -23,6 +23,11 @@ router.post('/session/:sessionId/response', auth, testController.saveResponse);
 // @access  Private
 router.post('/session/:sessionId/submit', auth, testController.submitTest);
 
+// @route   POST api/test/start-topic-test
+// @desc    Start an AI-recommended topic test
+// @access  Private
+router.post('/start-topic-test', auth, testController.startTopicTest);
+
 // @route   POST api/test/session/:sessionId/discard
 // @desc    Discard an active test session
 // @access  Private

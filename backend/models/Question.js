@@ -57,6 +57,15 @@ const questionSchema = new mongoose.Schema({
     exam: {
         type: String, // e.g., 'GATE CSE', 'JEE Main'
         required: true
+    },
+    isAiGenerated: {
+        type: Boolean,
+        default: false
+    },
+    generatedFor: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null
     }
 });
 

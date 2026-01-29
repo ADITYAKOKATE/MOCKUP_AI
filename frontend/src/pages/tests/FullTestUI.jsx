@@ -16,7 +16,8 @@ const FullTestUI = ({
     onClearResponse,
 
     onSubmit,
-    onDiscard
+    onDiscard,
+    onSaveAndExit
 }) => {
     const [isQuitModalOpen, setIsQuitModalOpen] = React.useState(false);
 
@@ -94,6 +95,7 @@ const FullTestUI = ({
                 onResume={() => setIsQuitModalOpen(false)}
                 onDiscard={onDiscard}
                 onSubmit={onSubmit}
+                onSaveAndExit={onSaveAndExit}
             />
 
         </div>

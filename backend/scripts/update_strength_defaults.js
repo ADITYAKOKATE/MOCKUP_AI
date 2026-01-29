@@ -12,49 +12,47 @@ const run = async () => {
         await mongoose.connect(process.env.MONGO_URI, { dbName: process.env.DB_NAME });
         console.log('✅ MongoDB Connected');
 
-        // Fetch all performance records
         const perfs = await Performance.find({});
         console.log(`Found ${perfs.length} performance records to update.`);
 
         for (const perf of perfs) {
-            console.log(`Updating Performance for user: ${perf.userId}`);
-
-            // Loop through all exams
+            let modified = false;
             if (perf.exams) {
                 for (const [examName, examData] of perf.exams.entries()) {
+
                     // Update Topic Stats
                     if (examData.topicStats) {
                         for (const [topic, stats] of examData.topicStats.entries()) {
-                            const oldStrength = stats.strength;
-                            stats.strength = Performance.calculateStrength(stats);
-                            if (oldStrength !== stats.strength) {
-                                console.log(`   - Topic "${topic}": Strength ${oldStrength} -> ${stats.strength}`);
+                            // If strength is null OR (strength is 0 AND attempts is 0) -> Set to 100
+                            if (stats.strength === null || stats.strength === undefined || (stats.strength === 0 && stats.totalAttempted === 0)) {
+                                stats.strength = 100;
+                                examData.topicStats.set(topic, stats); // Re-set to ensure map update
+                                modified = true;
                             }
-                            // Needed for map update detection
-                            examData.topicStats.set(topic, stats);
                         }
                     }
 
                     // Update Subject Stats
                     if (examData.subjectStats) {
                         for (const [subject, stats] of examData.subjectStats.entries()) {
-                            const oldStrength = stats.strength;
-                            stats.strength = Performance.calculateStrength(stats);
-                            if (oldStrength !== stats.strength) {
-                                console.log(`   - Subject "${subject}": Strength ${oldStrength} -> ${stats.strength}`);
+                            if (stats.strength === null || stats.strength === undefined || (stats.strength === 0 && stats.totalAttempted === 0)) {
+                                stats.strength = 100;
+                                examData.subjectStats.set(subject, stats);
+                                modified = true;
                             }
-                            examData.subjectStats.set(subject, stats);
                         }
                     }
                     perf.exams.set(examName, examData);
                 }
             }
-            // Mark modified and save
-            perf.markModified('exams');
-            await perf.save();
+            if (modified) {
+                perf.markModified('exams');
+                await perf.save();
+                console.log(`Updated initial strength to 100 for user: ${perf.userId}`);
+            }
         }
 
-        console.log("✅ Recalculation Complete");
+        console.log("✅ Migration Complete: All unattempted topics set to Strength 100.");
 
     } catch (error) {
         console.error('❌ Error:', error);

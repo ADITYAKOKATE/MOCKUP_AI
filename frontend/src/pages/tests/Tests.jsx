@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import FullTestUI from './FullTestUI.jsx';
@@ -14,14 +14,13 @@ import TestResults from './TestResults.jsx';
 const Tests = () => {
     const { selectedExam } = useAuth();
     const navigate = useNavigate();
+    const location = useLocation();
 
     // Test flow states
     const [testMode, setTestMode] = useState(null); // null, 'full', 'subject', etc.
     const [showInstructions, setShowInstructions] = useState(false);
     const [testPattern, setTestPattern] = useState(null);
     const [testResults, setTestResults] = useState(null);
-
-    // Resume Modal State
     const [showResumeModal, setShowResumeModal] = useState(false);
     const [activeSessionId, setActiveSessionId] = useState(null);
 
@@ -37,6 +36,40 @@ const Tests = () => {
     // Topic-wise test states
     const [showTopicModal, setShowTopicModal] = useState(false);
     const [selectedTopic, setSelectedTopic] = useState(null);
+
+    // Check for session ID passed from other pages (e.g., Topic Test)
+    useEffect(() => {
+        if (location.state && location.state.sessionId && !sessionId) {
+            console.log("Hydrating session from navigation state:", location.state.sessionId);
+            hydrateSession(location.state.sessionId);
+            // Clear state so we don't re-hydrate on refresh weirdly (optional, but good practice)
+            window.history.replaceState({}, document.title);
+        }
+    }, [location.state]);
+
+    const hydrateSession = async (sid) => {
+        try {
+            setLoading(true);
+            const data = await api.getSession(sid);
+
+            setSessionId(data.sessionId);
+            setQuestions(data.questions);
+            setResponses(data.responses || {});
+            setTimeLeft(data.timeRemaining);
+
+            // Set Pattern to generic/topic mode if not full
+            setTestMode('full'); // Reuse Full UI
+            setIsActive(true);
+
+            toast.success("Topic Test Started!");
+        } catch (error) {
+            console.error("Failed to hydrate session:", error);
+            toast.error("Failed to load test session");
+            navigate('/dashboard');
+        } finally {
+            setLoading(false);
+        }
+    };
 
     // Timer Logic
     useEffect(() => {
@@ -183,6 +216,22 @@ const Tests = () => {
         } finally {
             setLoading(false);
         }
+    };
+
+    // Handle Save and Exit (Quit without discarding)
+    const handleSaveAndExit = () => {
+        // Just navigate away or reset mode. Session remains active on server.
+        // We might want to ensure time is saved one last time?
+        // saveTimeForQuestion is called by effects or unmount logic usually, but let's be safe:
+        // Actually saveTimeForQuestion uses current Index logic which might be complex to invoke purely here.
+        // But auto-save works on interval.
+
+        toast.success("Progress saved. You can resume this test later.");
+        setTestMode(null);
+        setSessionId(null);
+        setQuestions([]);
+        setIsActive(false);
+        navigate('/dashboard'); // Or just go back to test list
     };
 
 
@@ -630,6 +679,7 @@ const Tests = () => {
         onClearResponse: handleClearResponse,
         onSubmit: handleSubmit,
         onDiscard: handleDiscardSession,
+        onSaveAndExit: handleSaveAndExit,
         sessionId,
         testMode
     };

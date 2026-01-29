@@ -3,7 +3,7 @@ import time
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from gpt4all import GPT4All
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 app = FastAPI()
 
@@ -17,7 +17,7 @@ print(f"📂 Model Path: {MODEL_PATH}")
 
 # Load Model (Global instance to avoid reloading)
 try:
-    model = GPT4All(MODEL_NAME, model_path=MODEL_PATH, allow_download=False)
+    model = GPT4All(MODEL_NAME, model_path=MODEL_PATH, allow_download=False, n_ctx=4096)
     print("✅ Model loaded successfully!")
 except Exception as e:
     print(f"❌ Failed to load model: {e}")
@@ -119,6 +119,116 @@ tutor:"""
     except Exception as e:
         print(f"❌ Generation error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+class QuestionExample(BaseModel):
+    question: str
+    options: List[str]
+    correct_answer: str
+    explanation: Optional[str] = None
+    type: str
+
+class GenerationRequest(BaseModel):
+    subject: str
+    topic: str
+    difficulty: str
+    exam_type: str
+    examples: List[QuestionExample]
+    count: int = 1
+
+@app.post("/generate-questions")
+async def generate_questions(request: GenerationRequest):
+    if not model:
+        raise HTTPException(status_code=503, detail="AI Model not initialized")
+    
+    try:
+        start_time = time.time()
+        print(f"🧠 Generating {request.count} questions for {request.topic} ({request.subject})...")
+        
+        # Format examples
+        examples_text = ""
+        for i, ex in enumerate(request.examples, 1):
+            examples_text += f"\nExample {i}:\nQuestion: {ex.question}\nOptions: {ex.options}\nCorrect Answer: {ex.correct_answer}\nExplanation: {ex.explanation}\n"
+
+        # Simplified Prompt - Text Based (More robust for local models than JSON)
+        prompt = f"""<|user|>
+You are an expert exam question setter for {request.exam_type}. 
+Task: Create {request.count} NEW practice question(s) on "{request.topic}" ({request.subject}).
+Difficulty: {request.difficulty}.
+
+Use this EXACT format for each question (do not use markdown or JSON):
+
+---
+Q: [Question text here]
+A) [Option 1]
+B) [Option 2]
+C) [Option 3]
+D) [Option 4]
+Correct: [Option text of the correct answer]
+Explanation: [Short explanation]
+---
+
+Rules:
+1. Create {request.count} unique questions.
+2. Do not copy the examples.
+3. Ensure 4 options.
+<|end|>
+<|assistant|>"""
+
+        # Generate with lower temp for stability
+        output = model.generate(prompt, max_tokens=2048, temp=0.1)
+        
+        cleaned_output = output.strip()
+        print(f"🔍 Raw LLM Output:\n{cleaned_output}\n-------------------")
+
+        # Parse the structured text
+        import re
+        
+        questions = []
+        # Split by separator
+        raw_blocks =cleaned_output.split('---')
+        
+        for block in raw_blocks:
+            if not block.strip(): continue
+            
+            # Extract fields using Regex
+            q_match = re.search(r'Q:\s*(.*?)(?=\n[A-D]\))', block, re.DOTALL)
+            a_match = re.search(r'A\)\s*(.*?)(?=\nB\))', block, re.DOTALL)
+            b_match = re.search(r'B\)\s*(.*?)(?=\nC\))', block, re.DOTALL)
+            c_match = re.search(r'C\)\s*(.*?)(?=\nD\))', block, re.DOTALL)
+            d_match = re.search(r'D\)\s*(.*?)(?=\nCorrect:)', block, re.DOTALL)
+            corr_match = re.search(r'Correct:\s*(.*?)(?=\nExplanation:|$)', block, re.DOTALL)
+            exp_match = re.search(r'Explanation:\s*(.*)', block, re.DOTALL)
+
+            if q_match and a_match and b_match and c_match and d_match and corr_match:
+                q_obj = {
+                    "question": q_match.group(1).strip(),
+                    "options": [
+                        a_match.group(1).strip(),
+                        b_match.group(1).strip(),
+                        c_match.group(1).strip(),
+                        d_match.group(1).strip()
+                    ],
+                    "correct_answer": corr_match.group(1).strip(),
+                    "explanation": exp_match.group(1).strip() if exp_match else "Explanation provided by AI.",
+                    "type": "MCQ"
+                }
+                questions.append(q_obj)
+
+        if not questions:
+            # Fallback: Try simpler split if regex fails (sometimes models miss newlines)
+            pass 
+
+        processing_time = time.time() - start_time
+        print(f"⏱️ Parsed {len(questions)} questions in {processing_time:.2f}s")
+        
+        return {
+            "questions": questions,
+            "processing_time": processing_time
+        }
+
+    except Exception as e:
+        print(f"❌ Generation error: {e}")
+        return {"questions": [], "error": str(e)}
 
 @app.get("/health")
 def health_check():

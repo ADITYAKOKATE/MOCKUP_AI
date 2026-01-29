@@ -28,6 +28,31 @@ export const testSessionService = {
     },
 
     /**
+     * Start a Topic-Specific Test (AI Recommended)
+     */
+    startTopicTest: async (topic, examType) => {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`${BASE_URL}/test/start-topic-test`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-auth-token': token
+            },
+            body: JSON.stringify({ topic, examType })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            const error = new Error(data.message || 'Failed to start topic test');
+            error.data = data;
+            throw error;
+        }
+
+        return data;
+    },
+
+    /**
      * Get active test session
      */
     getSession: async (sessionId) => {

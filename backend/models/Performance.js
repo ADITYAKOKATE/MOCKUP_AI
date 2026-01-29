@@ -53,7 +53,8 @@ const performanceSchema = new mongoose.Schema({
                     totalTime: { type: Number, default: 0 }, // Seconds
                     accuracy: { type: Number, default: 0 },
                     avgTime: { type: Number, default: 0 },
-                    strength: { type: Number, default: 0 }
+                    strength: { type: Number, default: 0 },
+                    lastStrengthDrop: { type: Date }
                 },
                 default: {}
             },
@@ -67,7 +68,8 @@ const performanceSchema = new mongoose.Schema({
                     totalTime: { type: Number, default: 0 }, // Seconds
                     accuracy: { type: Number, default: 0 },
                     avgTime: { type: Number, default: 0 },
-                    strength: { type: Number, default: 0 }
+                    strength: { type: Number, default: 0 },
+                    lastStrengthDrop: { type: Date }
                 },
                 default: {}
             },
@@ -81,7 +83,8 @@ const performanceSchema = new mongoose.Schema({
                     totalTime: { type: Number, default: 0 }, // Seconds
                     accuracy: { type: Number, default: 0 },
                     avgTime: { type: Number, default: 0 },
-                    strength: { type: Number, default: 0 }
+                    strength: { type: Number, default: 0 },
+                    lastStrengthDrop: { type: Date }
                 },
                 default: {}
             },
@@ -95,7 +98,8 @@ const performanceSchema = new mongoose.Schema({
                     totalTime: { type: Number, default: 0 }, // Seconds
                     accuracy: { type: Number, default: 0 },
                     avgTime: { type: Number, default: 0 },
-                    strength: { type: Number, default: 0 }
+                    strength: { type: Number, default: 0 },
+                    lastStrengthDrop: { type: Date }
                 },
                 default: {}
             }
@@ -198,6 +202,9 @@ performanceSchema.statics.updatePerformance = async function (userId, examName, 
             const stats = map.get(key);
 
             if (wasAttempted) {
+                // Capture old strength (logical default is 100 for unattempted, or current strength)
+                const oldStrength = stats.totalAttempted === 0 ? 100 : (stats.strength !== undefined ? stats.strength : 0);
+
                 stats.totalAttempted += 1;
                 stats.totalTime += timeTaken;
                 if (isCorrect) stats.totalCorrect += 1;
@@ -207,6 +214,11 @@ performanceSchema.statics.updatePerformance = async function (userId, examName, 
                 stats.accuracy = (stats.totalCorrect / stats.totalAttempted) * 100;
                 stats.avgTime = stats.totalTime / stats.totalAttempted;
                 stats.strength = PerformanceModel.calculateStrength(stats);
+
+                // Check for strength drop
+                if (stats.strength < oldStrength) {
+                    stats.lastStrengthDrop = new Date();
+                }
             } else {
                 stats.totalUnattempted += 1;
             }
@@ -414,20 +426,25 @@ performanceSchema.statics.calculateStrength = function (stats, expectedAvgTime =
     const accuracy = (stats.totalCorrect / stats.totalAttempted) * 100;
     const accuracyScore = (accuracy / 100) * 60;
 
-    // 2. Speed Score (0-25 points)
+    // 2. Speed Score (0-25 points) - Adjusted by Accuracy
+    // Speed only counts if you are answering correctly. Fast failures shouldn't be rewarded.
     const avgTimePerQuestion = stats.totalTime / stats.totalAttempted;
-    let speedScore = 0;
+    let baseSpeedScore = 0;
     if (avgTimePerQuestion <= expectedAvgTime * 0.7) {
-        speedScore = 25; // Very fast
+        baseSpeedScore = 25; // Very fast
     } else if (avgTimePerQuestion <= expectedAvgTime) {
-        speedScore = 20; // Good speed
+        baseSpeedScore = 20; // Good speed
     } else if (avgTimePerQuestion <= expectedAvgTime * 1.3) {
-        speedScore = 15; // Acceptable
+        baseSpeedScore = 15; // Acceptable
     } else if (avgTimePerQuestion <= expectedAvgTime * 1.5) {
-        speedScore = 10; // Slow
+        baseSpeedScore = 10; // Slow
     } else {
-        speedScore = 5; // Very slow
+        baseSpeedScore = 5; // Very slow
     }
+
+    // Scale speed score by accuracy factor
+    // If accuracy is 0%, speed score becomes 0. If 100%, full speed score.
+    const speedScore = baseSpeedScore * (accuracy / 100);
 
     // 3. Consistency Score (0-15 points) - Based on attempt count
     let consistencyScore = 0;
@@ -441,9 +458,32 @@ performanceSchema.statics.calculateStrength = function (stats, expectedAvgTime =
         consistencyScore = 5; // Low consistency
     }
 
-    // Total strength score
-    const strengthScore = Math.round(accuracyScore + speedScore + consistencyScore);
-    return Math.min(100, Math.max(0, strengthScore)); // Clamp between 0-100
+    // Total calculated strength score (Snapshot of current performance)
+    const currentPerformanceScore = Math.round(accuracyScore + speedScore + consistencyScore);
+
+    // 4. Damped Initial Confidence Logic (User Request: Start at 100)
+    // We start with a "Prior" belief that the user is 100% strong.
+    // As they make attempts, the Calculated Score gains more weight.
+    const PRIOR_STRENGTH = 100;
+    const PRIOR_WEIGHT = 1; // Reduced to 1 for maximum responsiveness.
+    // Higher weight = slower change from 100. Lower weight = faster drop.
+
+    /*
+     Formula: Weighted Average
+     Final = (Prior * Weight + Current * Attempts) / (Weight + Attempts)
+     
+     Example: 2 Questions Wrong (Score 0)
+     Old (Weight 2): (100*2 + 0) / 4 = 50 (Borderline)
+     New (Weight 1): (100*1 + 0) / 3 = 33 (Clearly Weak)
+    */
+
+    const totalAttempts = stats.totalAttempted;
+
+    if (totalAttempts === 0) return 100; // Explicitly start at 100
+
+    const weightedStrength = ((PRIOR_STRENGTH * PRIOR_WEIGHT) + (currentPerformanceScore * totalAttempts)) / (PRIOR_WEIGHT + totalAttempts);
+
+    return Math.min(100, Math.max(0, Math.round(weightedStrength)));
 };
 
 /**
@@ -535,24 +575,32 @@ performanceSchema.statics.getWeakTopics = async function (userId, examName, thre
         for (const [topic, stats] of examData.topicStats.entries()) {
             const strength = this.calculateStrength(stats);
 
-            // Include topics that are either weak or not attempted yet
-            if (strength === null || strength < threshold) {
+            // User Request: Only generate for DECREASING strength.
+            // Since default is now 100, "decreasing" means strength < 100 (and below threshold).
+            // We explicitly exclude null (legacy) and 100 (unattempted/perfect).
+            if (strength !== null && strength < threshold && strength < 100) {
                 weakTopics.push({
                     topic,
                     strength,
                     attempted: stats.totalAttempted,
                     accuracy: stats.totalAttempted > 0 ? (stats.totalCorrect / stats.totalAttempted * 100).toFixed(2) : 0,
-                    priority: strength === null ? 'unattempted' : (strength < 40 ? 'high' : 'medium')
+                    priority: strength < 40 ? 'high' : 'medium',
+                    lastStrengthDrop: stats.lastStrengthDrop
                 });
             }
         }
 
-        // Sort: unattempted first, then by lowest strength
+        // Sort by lastStrengthDrop (descending) first to prioritize recent drops
         weakTopics.sort((a, b) => {
-            if (a.strength === null && b.strength !== null) return -1;
-            if (a.strength !== null && b.strength === null) return 1;
-            return (a.strength || 0) - (b.strength || 0);
+            const dateA = a.lastStrengthDrop ? new Date(a.lastStrengthDrop).getTime() : 0;
+            const dateB = b.lastStrengthDrop ? new Date(b.lastStrengthDrop).getTime() : 0;
+            if (dateB !== dateA) return dateB - dateA; // Newest drop first
+            return (a.strength || 0) - (b.strength || 0); // Then weakest
         });
+
+        // Filter: Only include topics that dropped recently if 'recentOnly' logic is needed.
+        // For now, we return sorted list. The caller can filter by timestamp if strict "only now" is required.
+        // But updating the object to include lastStrengthDrop for the caller.
 
         return weakTopics.slice(0, limit);
 

@@ -205,16 +205,22 @@ exports.getAIRecommendations = async (req, res) => {
 
         const priorityOrder = { 'Critical': 0, 'High': 1, 'Medium': 2 };
         topicTests.sort((a, b) => {
+            // Primary Sort: Lowest Strength First (User's main request)
+            if (a.strength !== b.strength) {
+                return a.strength - b.strength;
+            }
+            // Secondary Sort: Priority
             if (priorityOrder[a.priority] !== priorityOrder[b.priority]) {
                 return priorityOrder[a.priority] - priorityOrder[b.priority];
             }
+            // Tertiary Sort: Lowest Accuracy
             return a.accuracy - b.accuracy;
         });
 
         const recommendations = {
             practiceTests: practiceTests.slice(0, 3),
             subjectTests: subjectTests.slice(0, 3),
-            topicTests: topicTests.slice(0, 6)
+            topicTests: topicTests // Return all qualifying topic tests
         };
 
         res.json(recommendations);

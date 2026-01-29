@@ -4,6 +4,7 @@ const ExamPattern = require('../models/ExamPattern');
 const Question = require('../models/Question');
 const Performance = require('../models/Performance');
 const { BRANCHES } = require('../utils/constants');
+const QuestionGenerator = require('../services/QuestionGenerator');
 
 /**
  * Start a full length test
@@ -25,10 +26,18 @@ exports.startFullTest = async (req, res) => {
         });
 
         if (existingSession) {
-            return res.status(400).json({
-                message: 'You already have an active test session',
-                sessionId: existingSession._id
-            });
+            // Check if it's actually expired but status is still active
+            if (existingSession.isExpired()) {
+                console.log(`[StartTest] Found expired active session ${existingSession._id}. Marking as expired.`);
+                existingSession.status = 'expired';
+                await existingSession.save();
+                // Proceed to create new session
+            } else {
+                return res.status(400).json({
+                    message: 'You already have an active test session',
+                    sessionId: existingSession._id
+                });
+            }
         }
 
         console.log(`[StartTest] Request received for exam: "${examType}"`);
@@ -262,6 +271,128 @@ exports.saveResponse = async (req, res) => {
  * Submit test and calculate results
  * POST /api/test/session/:sessionId/submit
  */
+// Start a Topic-Specific Test (AI Recommended)
+exports.startTopicTest = async (req, res) => {
+    try {
+        const { topic, examType } = req.body;
+        console.log(`[startTopicTest] Request: Topic="${topic}", Exam="${examType}"`);
+        const userId = req.user.id;
+
+        if (!topic) return res.status(400).json({ message: "Topic is required" });
+
+        // 1. Check for active session
+        const activeSession = await TestSession.findOne({ user: userId, status: 'active' });
+        if (activeSession) {
+            return res.status(400).json({
+                message: "You have an unfinished test in progress.",
+                sessionId: activeSession._id
+            });
+        }
+
+        // 2. Fetch Questions (Mix of AI and Standard)
+        const cleanTopic = topic.trim();
+        // Case-insensitive regex for topic matching
+        const topicRegex = new RegExp(`^${cleanTopic}$`, 'i');
+
+        // Handle Exam Type Mismatch (e.g. "jee-main" vs "JEE Main")
+        // Use [ -] to match space or hyphen. Avoid \\s which causes escape issues in RegExp constructor from string.
+        const examRegex = new RegExp(`^${examType.replace(/-/g, '[ -]')}$`, 'i');
+
+        // Normalize examType for storage (e.g. jee-main -> JEE Main)
+        let storedExamType = examType;
+        const foundPattern = await ExamPattern.findOne({ examName: { $regex: examRegex } });
+        if (foundPattern) {
+            storedExamType = foundPattern.examName;
+        } else {
+            // Fallback for common slugs if no pattern found by regex
+            if (examType.toLowerCase() === 'jee-main') storedExamType = 'JEE Main';
+            else if (examType.toLowerCase() === 'gate-cs') storedExamType = 'GATE CS';
+            // Add more normalization as needed
+        }
+
+        console.log(`[startTopicTest] Searching for Topic: "${cleanTopic}" (Regex: ${topicRegex}), Exam: "${examType}" (Regex: ${examRegex}), StoredExamType: "${storedExamType}"`);
+
+        const TOTAL_QUESTIONS = 20;
+
+        // A. Get AI Generated Questions for this topic
+        const aiQuestions = await Question.find({
+            topic: { $regex: topicRegex },
+            exam: { $regex: examRegex },
+            isAiGenerated: true
+        }).limit(10);
+
+        // B. Fill remainder with Standard Questions
+        const remainingCount = TOTAL_QUESTIONS - aiQuestions.length;
+        const standardQuestions = await Question.aggregate([
+            {
+                $match: {
+                    topic: { $regex: topicRegex.source, $options: 'i' },
+                    exam: { $regex: examRegex.source, $options: 'i' },
+                    isAiGenerated: { $ne: true }
+                }
+            },
+            { $sample: { size: remainingCount } }
+        ]);
+
+        const finalQuestions = [...aiQuestions, ...standardQuestions];
+        console.log(`[startTopicTest] Found: ${aiQuestions.length} AI + ${standardQuestions.length} Standard = ${finalQuestions.length} Total`);
+
+        if (finalQuestions.length === 0) {
+            console.warn(`[startTopicTest] 404 - No questions found for topic: "${cleanTopic}"`);
+            return res.status(404).json({ message: "No questions found for this topic." });
+        }
+
+        // 3. Create Session
+        // Use a dummy pattern structure since it's ad-hoc
+        const adHocPattern = {
+            examName: storedExamType, // Use Normalized Name
+            duration: 25, // 25 mins for 20 questions
+            totalQuestions: finalQuestions.length,
+            markingScheme: { correct: 4, incorrect: -1 },
+            negativeMarking: { MCQ: -1, NAT: 0, MSQ: 0 }, // Critical for calculateMarks
+            totalMarks: finalQuestions.length * 4 // Explicitly set totalMarks
+        };
+
+        const newSession = new TestSession({
+            userId: userId,
+            examType: storedExamType, // Use Normalized Name
+            testType: 'topic',
+            topic: topic, // Save the topic!
+            testPattern: adHocPattern,
+            questions: finalQuestions.map(q => ({
+                questionId: q._id,
+                status: 'not_visited',
+                subject: q.subject, // Save Subject
+                questionType: q.type, // Save Type
+                marksAllocated: 4 // Explicitly save marks (Default 4 for topic tests)
+            })),
+            startTime: new Date(),
+            timeRemaining: adHocPattern.duration * 60,
+            status: 'active'
+        });
+
+        await newSession.save();
+
+        res.status(201).json({
+            message: "Topic test started",
+            sessionId: newSession._id,
+            pattern: adHocPattern,
+            questions: finalQuestions.map(q => ({
+                id: q._id,
+                text: q.question,
+                options: q.options,
+                image: q.image,
+                type: q.type,
+                subject: q.subject
+            }))
+        });
+
+    } catch (error) {
+        console.error("Start Topic Test Error:", error);
+        res.status(500).json({ message: "Server Error" });
+    }
+};
+
 exports.submitTest = async (req, res) => {
     try {
         const { sessionId } = req.params;
@@ -278,7 +409,36 @@ exports.submitTest = async (req, res) => {
         }
 
         // Get exam pattern
-        const pattern = await ExamPattern.findOne({ examName: session.examType });
+        let pattern = await ExamPattern.findOne({ examName: session.examType });
+
+        // Fallback for Topic Tests (which use ad-hoc patterns stored in the session)
+        if (!pattern && session.testType === 'topic') {
+            console.log(`[SubmitTest] Using ad-hoc pattern for Topic Test: ${session.topic}`);
+
+            if (session.testPattern) {
+                pattern = session.testPattern;
+            } else {
+                // Fallback for sessions created before schema update (Zombie Sessions)
+                console.warn(`[SubmitTest] session.testPattern missing for ${sessionId}. Constructing default.`);
+                pattern = {
+                    examName: session.examType,
+                    markingScheme: { correct: 4, incorrect: -1 }, // Default assumption
+                    negativeMarking: { MCQ: -1, NAT: 0, MSQ: 0 }, // Critical
+                    totalMarks: session.questions.length * 4
+                };
+            }
+
+            // Ensure strictly required fields exist for calculation
+            if (!pattern.totalMarks) {
+                // Calculate total marks dynamically if missing (4 * count)
+                pattern.totalMarks = session.questions.length * (pattern.markingScheme?.correct || 4);
+            }
+        }
+
+        if (!pattern) {
+            console.error(`[SubmitTest] Pattern missing for session ${sessionId} (Type: ${session.testType})`);
+            return res.status(500).json({ message: 'Exam pattern config missing' });
+        }
 
         // Get all questions
         const questionIds = session.questions.map(q => q.questionId);
@@ -297,7 +457,8 @@ exports.submitTest = async (req, res) => {
             userId,
             testSessionId: session._id,
             examType: session.examType,
-            testType: 'Full',
+            testType: session.testType === 'topic' ? 'topic-wise' : 'Full', // Match requested format
+            topic: session.topic || null, // Save topic name if available
             questions: results.questions,
             totalQuestions: results.totalQuestions,
             totalAttempted: results.totalAttempted,
@@ -326,6 +487,12 @@ exports.submitTest = async (req, res) => {
         // Use the static method on the model to ensure correct schema usage (updating exams Map)
         try {
             await Performance.updatePerformance(userId, session.examType, attempt.questions, questionsMap);
+
+            // Trigger AI Generation for weak areas (Async - Fire and Forget)
+            // We do not await this, to keep response fast
+            QuestionGenerator.generateRemedialQuestions(userId, session.examType)
+                .catch(err => console.error('[SubmitTest] Background AI Gen Error:', err));
+
         } catch (perfError) {
             console.error('❌ Failed to update performance:', perfError);
             // Don't fail the test submission if performance update fails
@@ -452,6 +619,15 @@ function calculateResults(session, questions, questionsMap, pattern) {
         const question = questionsMap.get(sq.questionId.toString());
         const response = responses.get(sq.questionId.toString());
 
+        // Safety check: specific question might be deleted from DB
+        if (!question) {
+            console.warn(`[CalculateResults] Missing question in DB: ${sq.questionId}`);
+            // Count as unattempted/wrong or just skip? 
+            // Better to treat as unattempted but NOT crash
+            totalUnattempted++;
+            return; // Skip this iteration
+        }
+
         const userAnswer = response?.answer;
         const timeTaken = Number(response?.timeTaken || 0); // Force Number
         const marked = response?.marked || false;
@@ -462,7 +638,9 @@ function calculateResults(session, questions, questionsMap, pattern) {
         console.log(`[CalcResults] QID: ${sq.questionId}, UserAns: ${userAnswer}, HasAns: ${hasAnswer}, Time: ${timeTaken}`);
 
         const isCorrect = hasAnswer && checkAnswer(question, userAnswer);
-        const marksAwarded = calculateMarks(question, userAnswer, isCorrect, pattern, sq.marksAllocated);
+        // Fallback to 4 marks if missing in session (Zombie Session Fix)
+        const allocated = sq.marksAllocated || 4;
+        const marksAwarded = calculateMarks(question, userAnswer, isCorrect, pattern, allocated);
 
         const mistakeType = determineMistakeType(userAnswer, isCorrect, timeTaken);
 
@@ -597,7 +775,9 @@ function calculateMarks(question, userAnswer, isCorrect, pattern, marksAllocated
     if (isCorrect) {
         return marksAllocated;
     } else {
-        const negativeMarks = pattern.negativeMarking[question.type] || 0;
+        // Safe access (pattern.negativeMarking is undefined in old ad-hoc patterns)
+        const negMap = pattern.negativeMarking || {};
+        const negativeMarks = negMap[question.type] || -1; // Default to -1 if config missing
         return negativeMarks;
     }
 }
@@ -692,16 +872,22 @@ exports.discardSession = async (req, res) => {
         const { sessionId } = req.params;
         const userId = req.user.id;
 
-        const session = await TestSession.findOne({ _id: sessionId, userId });
+        // Use findOneAndUpdate to bypass potentially strict schema validation issues on save()
+        // if the document has partial/corrupted data
+        const session = await TestSession.findOneAndUpdate(
+            { _id: sessionId, userId },
+            {
+                $set: {
+                    status: 'expired',
+                    endTime: new Date()
+                }
+            },
+            { new: true }
+        );
 
         if (!session) {
             return res.status(404).json({ message: 'Test session not found' });
         }
-
-        // Mark as abandoned
-        session.status = 'expired'; // Or 'abandoned' if you add that enum
-        session.endTime = new Date();
-        await session.save();
 
         res.json({ message: 'Test session discarded' });
 
@@ -771,7 +957,7 @@ exports.getUserAttempts = async (req, res) => {
         }
 
         const attempts = await Attempt.find(filter)
-            .select('examType testType score totalMarks percentage accuracy createdAt subjectWise totalTimeTaken')
+            .select('examType testType topic score totalMarks percentage accuracy createdAt subjectWise totalTimeTaken')
             .sort({ createdAt: -1 });
 
         res.json(attempts);

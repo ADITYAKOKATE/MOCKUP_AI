@@ -16,6 +16,14 @@ const testSessionSchema = new mongoose.Schema({
         enum: ['full', 'subject', 'topic', 'revision', 'random', 'ai'],
         default: 'full'
     },
+    topic: {
+        type: String, // For topic-wise tests
+        default: null
+    },
+    testPattern: {
+        type: mongoose.Schema.Types.Mixed, // For ad-hoc patterns
+        default: null
+    },
     questions: [{
         questionId: {
             type: mongoose.Schema.Types.ObjectId,

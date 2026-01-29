@@ -39,7 +39,11 @@ const AIRecommendationTests = () => {
 
                 setPracticeTests(data.practiceTests || []);
                 setSubjectTests(data.subjectTests || []);
-                setTopicTests(data.topicTests || []);
+
+                // User Request: Only display tests for topics whose strength is less than 50
+                const allTopicTests = data.topicTests || [];
+                const weakTopicTests = allTopicTests.filter(test => test.strength < 50);
+                setTopicTests(weakTopicTests);
             } catch (error) {
                 console.error('[AI Recommendations] Failed to fetch:', error);
                 toast.error('Failed to load recommendations. Please try again.');
@@ -77,9 +81,39 @@ const AIRecommendationTests = () => {
         return 'text-red-600';
     };
 
-    const handleStartTest = (testData, type) => {
+    const handleStartTest = async (testData, type) => {
         console.log('Starting test:', type, testData);
-        // TODO: Implement navigation to test creation
+
+        try {
+            if (type === 'topic') {
+                setLoading(true);
+                // 1. Call API to start session
+                const data = await api.startTopicTest(testData.topic, selectedExam);
+
+                // 2. Navigate to Tests page with session ID
+                navigate('/tests', {
+                    state: {
+                        sessionId: data.sessionId,
+                        mode: 'full' // Treat as full test environment
+                    }
+                });
+            } else {
+                toast('This test type is coming soon!', { icon: '🚧' });
+            }
+        } catch (error) {
+            console.error("Start Test Error:", error);
+
+            // Handle Active Session Conflict
+            if (error.data && error.data.sessionId) {
+                toast.error("You have an active test session! Please finish or discard it.");
+                // Optional: navigate to tests to resume?
+                navigate('/tests');
+            } else {
+                toast.error(error.message || "Failed to start test");
+            }
+        } finally {
+            setLoading(false);
+        }
     };
 
     // Loading State
