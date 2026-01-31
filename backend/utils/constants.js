@@ -1016,15 +1016,23 @@ function getExamStructure(examName) {
     }
 
     // 2. Handle aliases/variations
-    if (examName === 'GATE CSE' || examName === 'GATE CS') return METADATA['GATE']['CS'];
-    if (examName === 'GATE DA') return METADATA['GATE']['DA'];
-    if (examName === 'GATE EC') return METADATA['GATE']['EC'];
-    if (examName === 'GATE EE') return METADATA['GATE']['EE'];
-    if (examName === 'GATE ME') return METADATA['GATE']['ME'];
-    if (examName === 'GATE CE') return METADATA['GATE']['CE'];
-    if (examName === 'GATE IN') return METADATA['GATE']['IN'];
-    if (examName === 'GATE CH') return METADATA['GATE']['CH'];
-    if (examName === 'GATE BT') return METADATA['GATE']['BT'];
+    const nameUpper = examName.toUpperCase();
+    const nameNormalized = nameUpper.replace(/-/g, '_').replace(/ /g, '_'); // "JEE-MAIN" -> "JEE_MAIN"
+
+    if (nameUpper === 'GATE CSE' || nameUpper === 'GATE CS' || nameUpper === 'GATE-CS') return METADATA['GATE']['CS'];
+    if (nameNormalized.includes('GATE')) {
+        // Extract branch if possible
+        const branch = Object.keys(METADATA.GATE).find(b => nameNormalized.includes(b));
+        if (branch) return METADATA.GATE[branch];
+    }
+
+    // Direct lookup in METADATA keys (JEE_MAIN, JEE_ADVANCED, MHT_CET)
+    if (METADATA[nameNormalized]) return METADATA[nameNormalized];
+
+    // Manual mapping fallback
+    if (nameNormalized === 'JEE_MAIN') return METADATA['JEE_MAIN'];
+    if (nameNormalized === 'JEE_ADVANCED') return METADATA['JEE_ADVANCED'];
+    if (nameNormalized === 'MHT_CET') return METADATA['MHT_CET'];
 
     return null;
 }

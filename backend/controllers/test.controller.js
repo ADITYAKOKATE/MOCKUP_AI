@@ -3,7 +3,7 @@ const Attempt = require('../models/Attempt');
 const ExamPattern = require('../models/ExamPattern');
 const Question = require('../models/Question');
 const Performance = require('../models/Performance');
-const { BRANCHES } = require('../utils/constants');
+const { BRANCHES, METADATA, EXAMS } = require('../utils/constants');
 const QuestionGenerator = require('../services/QuestionGenerator');
 
 /**
@@ -393,6 +393,484 @@ exports.startTopicTest = async (req, res) => {
     }
 };
 
+/**
+ * Start a Subject Wise Test
+ * POST /api/test/start-subject-test
+ */
+exports.startSubjectTest = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { examType, subject } = req.body;
+
+        if (!examType || !subject) {
+            return res.status(400).json({ message: 'Exam type and subject are required' });
+        }
+
+        // Check for active session
+        const activeSession = await TestSession.findOne({ userId, status: 'active' });
+        if (activeSession) {
+            return res.status(400).json({
+                message: "You already have an active test session",
+                sessionId: activeSession._id
+            });
+        }
+
+        // Normalize Exam Type to find Metadata Key
+        // METADATA keys: GATE, JEE_MAIN, JEE_ADVANCED, NEET
+        // EXAMS values: GATE, JEE Main, JEE Advanced, NEET
+
+        let metaKey = null;
+        let branchKey = null;
+
+        // reverse lookup from EXAMS value to key
+        for (const [key, value] of Object.entries(EXAMS)) {
+            if (value.toLowerCase() === examType.toLowerCase() || key.toLowerCase() === examType.toLowerCase()) {
+                metaKey = key;
+                break;
+            }
+        }
+
+        // Special handling for GATE CS, etc.
+        if (!metaKey && examType.toUpperCase().startsWith('GATE')) {
+            metaKey = 'GATE';
+            // Extract branch if present (e.g. "GATE CS")
+            const parts = examType.split(' ');
+            if (parts.length > 1) {
+                branchKey = parts[1].toUpperCase();
+            }
+        }
+
+        // If still not found, try simple normalization
+        if (!metaKey) {
+            // "jee-main" -> "JEE_MAIN"
+            metaKey = examType.replace(/-/g, '_').replace(/\s+/g, '_').toUpperCase();
+        }
+
+        // Find Topics List
+        let topicsList = [];
+        const examData = METADATA[metaKey];
+
+        if (!examData) {
+            return res.status(404).json({ message: `Configuration not found for exam: ${examType}` });
+        }
+
+        // Check if examData has branches (nested) or direct subjects
+        // For GATE, examData has keys "CS", "EC", etc.
+        // For JEE, examData has keys "Physics", "Chemistry", etc.
+
+        if (metaKey === 'GATE') {
+            // Need branch. If not inferred from examType, maybe passed separately or assume CS?
+            // For now, assume examType might be "GATE CS" or user passed generic GATE (not supported yet without branch)
+            if (!branchKey) branchKey = 'CS'; // Defaulting to CS for safety, or error out
+
+            const branchData = examData[branchKey];
+            if (branchData && branchData[subject]) {
+                topicsList = branchData[subject]; // Arrays/Object
+            }
+        } else {
+            // JEE, NEET
+            if (examData[subject]) {
+                topicsList = examData[subject];
+            }
+        }
+
+        if (!topicsList || (Array.isArray(topicsList) && topicsList.length === 0)) {
+            return res.status(404).json({ message: `No topics found for subject: ${subject} in ${examType}` });
+        }
+
+        // Ensure topicsList is an array of strings
+        // In constants.js, typical structure is Key -> Array of Strings
+        // But verify if it's Key -> Object (subtopics)
+        let finalTopics = [];
+        if (Array.isArray(topicsList)) {
+            finalTopics = topicsList;
+        } else if (typeof topicsList === 'object') {
+            finalTopics = Object.keys(topicsList);
+        }
+
+        // Fetch Questions
+        const TOTAL_QUESTIONS = 20;
+        const questionsPerTopic = Math.max(1, Math.floor(TOTAL_QUESTIONS / finalTopics.length));
+
+        let selectedQuestions = [];
+
+        // Shuffle topics to ensure variety if we have many topics
+        const shuffledTopics = finalTopics.sort(() => 0.5 - Math.random());
+
+        // Accumulate questions
+        for (const topic of shuffledTopics) {
+            if (selectedQuestions.length >= TOTAL_QUESTIONS) break;
+
+            // Calculate how many to fetch for this topic
+            // Distribute remainder dynamically or stick to fixed?
+            // Let's try to fill up to 20
+            const remaining = TOTAL_QUESTIONS - selectedQuestions.length;
+            const countToFetch = Math.min(questionsPerTopic, remaining);
+
+            if (countToFetch <= 0) break;
+
+            // Determine the correct exam name for DB query using keys
+            let dbExamName = EXAMS[metaKey];
+            if (!dbExamName) {
+                // Fallback: try to be smart about "jee-main" -> "jee"
+                dbExamName = examType.split('-')[0].split(' ')[0];
+            }
+
+            const query = {
+                exam: { $regex: new RegExp(dbExamName, 'i') },
+                subject: { $regex: new RegExp(`^${subject}$`, 'i') },
+                topic: { $regex: new RegExp(topic, 'i') }
+            };
+
+            const questions = await Question.aggregate([
+                { $match: query },
+                { $sample: { size: countToFetch } }
+            ]);
+
+            questions.forEach(q => {
+                // Ensure critical fields
+                q.subject = subject;
+                q.topic = topic;
+            });
+
+            selectedQuestions.push(...questions);
+        }
+
+        // If we still need more questions, fill with random from subject
+        if (selectedQuestions.length < TOTAL_QUESTIONS) {
+            const needed = TOTAL_QUESTIONS - selectedQuestions.length;
+
+            const query = {
+                exam: { $regex: new RegExp(examType.split(' ')[0], 'i') }, // Fuzzy match
+                subject: { $regex: new RegExp(`^${subject}$`, 'i') },
+                _id: { $nin: selectedQuestions.map(q => q._id) } // Exclude already selected
+            };
+
+            const randomFill = await Question.aggregate([
+                { $match: query },
+                { $sample: { size: needed } }
+            ]);
+            selectedQuestions.push(...randomFill);
+        }
+
+        if (selectedQuestions.length === 0) {
+            return res.status(404).json({ message: "No questions available for this subject." });
+        }
+
+
+
+        // Use the official exam name if available, otherwise fallback to input
+        // Re-derive dbExamName if scope issues (it's inside the loop above)
+        let savedExamName = EXAMS[metaKey];
+        if (!savedExamName) {
+            savedExamName = examType.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()); // "jee-main" -> "Jee Main" (approx) or keep raw if failing
+            if (!savedExamName.includes(' ')) savedExamName = examType; // Safety
+        } else if (savedExamName === 'GATE' && examType.toUpperCase().startsWith('GATE')) {
+            // Special Case: Preserve Branch for GATE (e.g. "GATE CS", "GATE DA")
+            // Input examType might be "gate-cs" or "gate cs"
+            const parts = examType.split(/[- ]/);
+            if (parts.length > 1) {
+                const branch = parts[1].toUpperCase();
+                savedExamName = `GATE ${branch}`;
+            }
+        }
+
+        // Create Session
+        const testSession = new TestSession({
+            userId,
+            examType: savedExamName, // Save Normalized Name
+            testType: 'subject', // NEW TYPE
+            subject: subject,    // Store subject
+            questions: selectedQuestions.map((q, index) => ({
+                questionId: q._id,
+                subject: q.subject,
+                topic: q.topic, // Store topic if schema supports, else just transient
+                section: q.section || 'A',
+                questionNumber: index + 1,
+                marksAllocated: 4, // Default marks
+                questionType: q.type || 'MCQ'
+            })),
+            duration: 60, // 60 mins as requested
+            timeRemaining: 60 * 60,
+            status: 'active'
+        });
+
+        await testSession.save();
+
+        res.json({
+            sessionId: testSession._id,
+            pattern: {
+                displayName: `${examType} - ${subject} Test`,
+                totalQuestions: selectedQuestions.length,
+                totalMarks: selectedQuestions.length * 4,
+                duration: 60,
+                markingScheme: { correct: 4, incorrect: -1 },
+                negativeMarking: { MCQ: -1, NAT: 0, MSQ: 0 },
+                questionsToAttempt: selectedQuestions.length,
+                instructions: ["This test contains subject-specific questions.", "Each correct answer carries 4 marks.", "Incorrect answers generally carry negative marks as per standard rules."],
+                subject: subject
+            },
+            questions: selectedQuestions.map(q => ({
+                id: q._id,
+                text: q.question,
+                options: q.options,
+                image: q.image,
+                type: q.type,
+                subject: q.subject,
+                topic: q.topic,
+                marksAllocated: 4
+            })),
+            startTime: testSession.startTime
+        });
+
+    } catch (error) {
+        console.error('Error starting subject test:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
+/**
+ * Start a Topic Wise Test
+ * POST /api/test/start-topic-test
+ */
+exports.startTopicTest = async (req, res) => {
+    try {
+        const { examType, subject, topic } = req.body;
+        const userId = req.user.id; // From auth middleware
+
+        if (!examType || !subject || !topic) {
+            return res.status(400).json({ message: 'Exam type, subject, and topic are required' });
+        }
+
+        // Normalize Exam Name
+        const metaKey = Object.keys(EXAMS).find(key => EXAMS[key] === examType) ||
+            Object.keys(EXAMS).find(key => key === examType);
+
+        let savedExamName = EXAMS[metaKey];
+        if (!savedExamName) {
+            savedExamName = examType.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+            if (!savedExamName.includes(' ')) savedExamName = examType;
+        } else if (savedExamName === 'GATE' && examType.toUpperCase().startsWith('GATE')) {
+            const parts = examType.split(/[- ]/);
+            if (parts.length > 1) {
+                const branch = parts[1].toUpperCase();
+                savedExamName = `GATE ${branch}`;
+            }
+        }
+
+        console.log(`[StartTopicTest] Starting for: ${savedExamName} - ${subject} - ${topic}`);
+
+        // Fetch Questions for this Topic
+        // We want a reasonable number of questions, say 15-30, or all available
+        const query = {
+            exam: { $regex: new RegExp(savedExamName.split(' ')[0], 'i') }, // Broad match for Exam
+            subject: { $regex: new RegExp(subject, 'i') },
+            topic: { $regex: new RegExp(topic, 'i') }
+        };
+
+        // If specific branch for GATE
+        if (savedExamName.startsWith('GATE')) {
+            // Refine if questions have branch info (optional, depends on your DB)
+        }
+
+        const questions = await Question.find(query).limit(30);
+
+        if (!questions || questions.length === 0) {
+            console.log(`[StartTopicTest] No questions found for query:`, JSON.stringify(query));
+            return res.status(404).json({ message: 'No questions available for this topic yet.' });
+        }
+
+        // Shuffle
+        const selectedQuestions = questions.sort(() => 0.5 - Math.random());
+
+        // Create Session
+        const testSession = new TestSession({
+            userId,
+            examType: savedExamName,
+            testType: 'topic',
+            subject: subject,
+            topic: topic,
+            questions: selectedQuestions.map((q, index) => ({
+                questionId: q._id,
+                subject: q.subject || subject, // Fallback to selected subject
+                topic: q.topic || topic,       // Fallback to selected topic
+                section: 'Topic Test',
+                questionNumber: index + 1,
+                marksAllocated: 4, // Default per question
+                questionType: q.type || 'MCQ'
+            })),
+            duration: 30, // 30 mins for topic test
+            timeRemaining: 30 * 60,
+            status: 'active',
+            testPattern: { // Save pattern for UI instructions
+                displayName: `Topic Test: ${topic}`,
+                totalQuestions: selectedQuestions.length,
+                totalMarks: selectedQuestions.length * 4,
+                duration: 30,
+                markingScheme: { correct: 4, incorrect: -1 },
+                negativeMarking: { MCQ: -1, NAT: 0, MSQ: 0 },
+                questionsToAttempt: selectedQuestions.length,
+                instructions: [
+                    `Topic: ${topic} (${subject})`,
+                    "Each correct answer carries 4 marks.",
+                    "Incorrect answers carry negative marks."
+                ],
+                subject: subject,
+                topic: topic
+            }
+        });
+
+        await testSession.save();
+
+        res.json({
+            sessionId: testSession._id,
+            pattern: testSession.testPattern,
+            questions: selectedQuestions.map(q => ({
+                id: q._id,
+                text: q.question,
+                options: q.options,
+                image: q.image,
+                type: q.type,
+                subject: q.subject,
+                topic: q.topic,
+                marksAllocated: 4
+            }))
+        });
+
+    } catch (error) {
+        console.error('Failed to start topic test:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
+
+
+/** 
+ * Start a Custom (Random Mix) Test
+ * POST /api/test/start-custom-test
+ */
+exports.startCustomTest = async (req, res) => {
+    try {
+        const { examType, subjects, topics, count, duration, questionTypes } = req.body;
+        const userId = req.user.id;
+
+        console.log(`[StartCustomTest] Request: Exam="${examType}", Subjects=[${subjects}], Topics=[${topics}], Count=${count}, Time=${duration}, Types=[${questionTypes}]`);
+
+        if (!examType || !subjects || subjects.length === 0) {
+            return res.status(400).json({ message: 'Exam type and at least one subject are required' });
+        }
+
+        const activeSession = await TestSession.findOne({ userId, status: 'active' });
+        if (activeSession) {
+            return res.status(400).json({
+                message: "You already have an active test session",
+                sessionId: activeSession._id
+            });
+        }
+
+        let savedExamName = examType;
+        const metaKey = Object.keys(EXAMS).find(key => EXAMS[key] === examType) ||
+            Object.keys(EXAMS).find(key => key === examType);
+
+        if (metaKey) {
+            savedExamName = EXAMS[metaKey];
+        } else {
+            savedExamName = examType.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+            if (savedExamName.toUpperCase().includes('GATE') && !savedExamName.split(' ')[1]) {
+            }
+        }
+
+        const examRegex = new RegExp(savedExamName.split(' ')[0], 'i');
+        const subjectRegex = new RegExp(`^(${subjects.join('|')})$`, 'i');
+
+        const pipeline = [
+            {
+                $match: {
+                    exam: { $regex: examRegex },
+                    subject: { $regex: subjectRegex }
+                }
+            }
+        ];
+
+        if (topics && topics.length > 0) {
+            const safeTopics = topics.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+            const topicRegex = new RegExp(`^(${safeTopics.join('|')})$`, 'i');
+            pipeline[0].$match.topic = { $regex: topicRegex };
+        }
+
+        // Filter by Question Type
+        if (questionTypes && questionTypes.length > 0) {
+            pipeline[0].$match.type = { $in: questionTypes };
+        }
+
+        const questionsToFetch = Math.min(count || 20, 100);
+        pipeline.push({ $sample: { size: questionsToFetch } });
+
+        console.log(`[StartCustomTest] Executing Aggregation:`, JSON.stringify(pipeline));
+
+        const questions = await Question.aggregate(pipeline);
+
+        if (!questions || questions.length === 0) {
+            return res.status(404).json({ message: 'No questions found matching your criteria.' });
+        }
+
+        const testSession = new TestSession({
+            userId,
+            examType: savedExamName,
+            testType: 'random',
+            subject: subjects.length === 1 ? subjects[0] : 'Mixed',
+            questions: questions.map((q, index) => ({
+                questionId: q._id,
+                subject: q.subject,
+                topic: q.topic,
+                section: 'Custom Mix',
+                questionNumber: index + 1,
+                marksAllocated: 4,
+                questionType: q.type || 'MCQ'
+            })),
+            duration: duration || 30,
+            timeRemaining: (duration || 30) * 60,
+            status: 'active',
+            testPattern: {
+                displayName: `Custom Test (${subjects.length} Subjects)`,
+                totalQuestions: questions.length,
+                totalMarks: questions.length * 4,
+                duration: duration || 30,
+                markingScheme: { correct: 4, incorrect: -1 },
+                negativeMarking: { MCQ: -1, NAT: 0, MSQ: 0 },
+                questionsToAttempt: questions.length,
+                instructions: [
+                    "Customized Practice Session.",
+                    "Questions selected from: " + subjects.join(', '),
+                    "Mixed topics."
+                ],
+                customConfig: { subjects, topics, count, duration, questionTypes }
+            }
+        });
+
+        await testSession.save();
+
+        res.status(201).json({
+            message: "Custom test started",
+            sessionId: testSession._id,
+            pattern: testSession.testPattern,
+            questions: questions.map(q => ({
+                id: q._id,
+                text: q.question,
+                options: q.options,
+                image: q.image,
+                type: q.type,
+                subject: q.subject,
+                topic: q.topic
+            }))
+        });
+
+    } catch (error) {
+        console.error('Failed to start custom test:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
 exports.submitTest = async (req, res) => {
     try {
         const { sessionId } = req.params;
@@ -433,6 +911,26 @@ exports.submitTest = async (req, res) => {
                 // Calculate total marks dynamically if missing (4 * count)
                 pattern.totalMarks = session.questions.length * (pattern.markingScheme?.correct || 4);
             }
+        } else if (session.testType === 'subject') {
+            // Default pattern for subject test
+            pattern = {
+                examName: session.examType,
+                markingScheme: { correct: 4, incorrect: -1 },
+                negativeMarking: { MCQ: -1, NAT: 0, MSQ: 0 },
+                totalMarks: session.questions.length * 4
+            };
+        } else if (session.testType === 'random') {
+            // Custom Mix Test
+            if (session.testPattern) {
+                pattern = session.testPattern;
+            } else {
+                pattern = {
+                    examName: session.examType,
+                    markingScheme: { correct: 4, incorrect: -1 },
+                    negativeMarking: { MCQ: -1, NAT: 0, MSQ: 0 },
+                    totalMarks: session.questions.length * 4
+                };
+            }
         }
 
         if (!pattern) {
@@ -457,8 +955,11 @@ exports.submitTest = async (req, res) => {
             userId,
             testSessionId: session._id,
             examType: session.examType,
-            testType: session.testType === 'topic' ? 'topic-wise' : 'Full', // Match requested format
+            testType: session.testType === 'topic' ? 'Topic' :
+                (session.testType === 'subject' ? 'Subject' :
+                    (session.testType === 'random' ? 'Random' : 'Full')),
             topic: session.topic || null, // Save topic name if available
+            subject: session.subject || null, // Save subject for subject tests
             questions: results.questions,
             totalQuestions: results.totalQuestions,
             totalAttempted: results.totalAttempted,
@@ -504,12 +1005,21 @@ exports.submitTest = async (req, res) => {
             totalMarks: pattern.totalMarks,
             accuracy: results.accuracy,
             percentage: results.percentage,
+            totalCorrect: results.totalCorrect,
+            totalWrong: results.totalWrong,
+            totalUnattempted: results.totalUnattempted,
+            totalQuestions: results.totalQuestions,
+            subjectWise: results.subjectWise,
+            totalTimeTaken: results.totalTimeTaken,
             message: 'Test submitted successfully'
         });
 
     } catch (error) {
         console.error('Error submitting test:', error);
-        res.status(500).json({ message: 'Server error' });
+        if (error.name === 'ValidationError') {
+            console.error('Validation Errors:', JSON.stringify(error.errors, null, 2));
+        }
+        res.status(500).json({ message: 'Server error', details: error.message });
     }
 };
 
@@ -954,10 +1464,11 @@ exports.getUserAttempts = async (req, res) => {
 
             // Use prefix match to handle variations
             filter.examType = { $regex: new RegExp(`^${searchExam}`, 'i') };
+            console.log(`[History] Filter:`, JSON.stringify(filter));
         }
 
         const attempts = await Attempt.find(filter)
-            .select('examType testType topic score totalMarks percentage accuracy createdAt subjectWise totalTimeTaken')
+            .select('examType testType topic subject score totalMarks percentage accuracy createdAt subjectWise totalTimeTaken')
             .sort({ createdAt: -1 });
 
         res.json(attempts);

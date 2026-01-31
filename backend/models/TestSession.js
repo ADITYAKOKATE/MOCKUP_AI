@@ -20,6 +20,10 @@ const testSessionSchema = new mongoose.Schema({
         type: String, // For topic-wise tests
         default: null
     },
+    subject: {
+        type: String, // For subject-wise tests
+        default: null
+    },
     testPattern: {
         type: mongoose.Schema.Types.Mixed, // For ad-hoc patterns
         default: null

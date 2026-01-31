@@ -103,8 +103,7 @@ const attemptSchema = new mongoose.Schema({
 
     // Subject-wise breakdown
     subjectWise: {
-        type: Map,
-        of: Object // Simplified to avoid Schema complexity issues
+        type: mongoose.Schema.Types.Mixed, // Relaxed validation to prevent Map conversion errors
     },
 
     // Time tracking

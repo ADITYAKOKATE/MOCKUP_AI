@@ -88,7 +88,7 @@ const AIRecommendationTests = () => {
             if (type === 'topic') {
                 setLoading(true);
                 // 1. Call API to start session
-                const data = await api.startTopicTest(testData.topic, selectedExam);
+                const data = await api.startTopicTest(selectedExam, testData.subject, testData.topic);
 
                 // 2. Navigate to Tests page with session ID
                 navigate('/tests', {

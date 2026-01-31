@@ -28,9 +28,34 @@ export const testSessionService = {
     },
 
     /**
-     * Start a Topic-Specific Test (AI Recommended)
+     * Start a Subject Wise Test
      */
-    startTopicTest: async (topic, examType) => {
+    startSubjectTest: async (examType, subject) => {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`${BASE_URL}/test/start-subject-test`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-auth-token': token
+            },
+            body: JSON.stringify({ examType, subject })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            const error = new Error(data.message || 'Failed to start subject test');
+            error.data = data;
+            throw error;
+        }
+
+        return data;
+    },
+
+    /**
+     * Start a Topic-Specific Test
+     */
+    startTopicTest: async (examType, subject, topic) => {
         const token = localStorage.getItem('token');
         const response = await fetch(`${BASE_URL}/test/start-topic-test`, {
             method: 'POST',
@@ -38,13 +63,38 @@ export const testSessionService = {
                 'Content-Type': 'application/json',
                 'x-auth-token': token
             },
-            body: JSON.stringify({ topic, examType })
+            body: JSON.stringify({ examType, subject, topic })
         });
 
         const data = await response.json();
 
         if (!response.ok) {
             const error = new Error(data.message || 'Failed to start topic test');
+            error.data = data;
+            throw error;
+        }
+
+        return data;
+    },
+
+    /**
+     * Start a Custom (Random Mix) Test
+     */
+    startCustomTest: async ({ examType, subjects, topics, count, duration, questionTypes }) => {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`${BASE_URL}/test/start-custom-test`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-auth-token': token
+            },
+            body: JSON.stringify({ examType, subjects, topics, count, duration, questionTypes })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            const error = new Error(data.message || 'Failed to start custom test');
             error.data = data;
             throw error;
         }
