@@ -14,7 +14,8 @@ const ShortTestUI = ({
     onMarkForReview,
 
     onSubmit,
-    onDiscard
+    onDiscard,
+    title
 }) => {
     const [isQuitModalOpen, setIsQuitModalOpen] = React.useState(false);
 
@@ -32,7 +33,7 @@ const ShortTestUI = ({
             {/* Top Bar - Fixed */}
             <div className="flex-shrink-0 z-50">
                 <TestTopbar
-                    title="Short Quiz"
+                    title={title || "Short Quiz"}
                     timeLeft={timeLeft}
                     currentQ={currentQuestionIndex}
                     totalQ={questions.length}

@@ -8,6 +8,21 @@ const auth = require('../middleware/auth');
 // @access  Private
 router.post('/start-full-test', auth, testController.startFullTest);
 
+// @route   POST api/test/start-subject-test
+// @desc    Start a subject wise test
+// @access  Private
+router.post('/start-subject-test', auth, testController.startSubjectTest);
+
+// @route   POST api/test/start-topic-test
+// @desc    Start an AI-recommended topic test
+// @access  Private
+router.post('/start-topic-test', auth, testController.startTopicTest);
+
+// @route   POST api/test/start-custom-test
+// @desc    Start a customized test (random mix)
+// @access  Private
+router.post('/start-custom-test', auth, testController.startCustomTest);
+
 // @route   GET api/test/session/:sessionId
 // @desc    Get active test session
 // @access  Private

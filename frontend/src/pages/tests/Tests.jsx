@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { api } from '../../services/api';
@@ -5,11 +6,13 @@ import { useAuth } from '../../context/AuthContext';
 import FullTestUI from './FullTestUI.jsx';
 import ShortTestUI from './ShortTestUI.jsx';
 import TopicSelectionModal from './TopicSelectionModal.jsx';
+import CustomTestModal from './CustomTestModal.jsx';
 import TestInstructions from './TestInstructions.jsx';
 import toast from 'react-hot-toast';
 
-import { ChevronRight, LayoutGrid, Clock, BookOpen, Shuffle, Sparkles, Target, Zap, AlertTriangle, PlayCircle, RefreshCw } from 'lucide-react';
+import { ChevronRight, LayoutGrid, Clock, BookOpen, Shuffle, Sparkles, Target, Zap, AlertTriangle, PlayCircle, RefreshCw, Dna, ArrowRight } from 'lucide-react';
 import TestResults from './TestResults.jsx';
+import SubjectSelectionModal from './SubjectSelectionModal.jsx';
 
 const Tests = () => {
     const { selectedExam } = useAuth();
@@ -23,6 +26,12 @@ const Tests = () => {
     const [testResults, setTestResults] = useState(null);
     const [showResumeModal, setShowResumeModal] = useState(false);
     const [activeSessionId, setActiveSessionId] = useState(null);
+    const [isSubjectModalOpen, setIsSubjectModalOpen] = useState(false);
+    const [isTopicModalOpen, setIsTopicModalOpen] = useState(false);
+    const [isCustomModalOpen, setIsCustomModalOpen] = useState(false);
+    const [subjectForTopic, setSubjectForTopic] = useState(null);
+    const [testIntent, setTestIntent] = useState(null); // 'subject', 'topic' (to track selection flow)
+    const [pendingCustomConfig, setPendingCustomConfig] = useState(null); // For retrying custom test (to track selection flow)
 
     // Full test session states
     const [sessionId, setSessionId] = useState(null);
@@ -34,8 +43,10 @@ const Tests = () => {
     const [isActive, setIsActive] = useState(false);
 
     // Topic-wise test states
-    const [showTopicModal, setShowTopicModal] = useState(false);
     const [selectedTopic, setSelectedTopic] = useState(null);
+
+    // Subject-wise test states
+    const [selectedSubject, setSelectedSubject] = useState(null);
 
     // Check for session ID passed from other pages (e.g., Topic Test)
     useEffect(() => {
@@ -172,23 +183,66 @@ const Tests = () => {
             setLoading(true);
             setShowResumeModal(false);
 
-            await api.discardSession(activeSessionId);
+            if (activeSessionId) {
+                try {
+                    await api.discardSession(activeSessionId);
+                } catch (e) {
+                    console.warn("Session discard failed or already gone, proceeding...", e);
+                }
+            }
 
-            // Retry starting full test
-            const data = await api.startFullTest(selectedExam);
-
-            setTestPattern(data.pattern);
-            setShowInstructions(true);
-            setSessionId(data.sessionId);
-            setQuestions(data.questions);
-            setTimeLeft(data.pattern.duration * 60);
+            // Determine which test to restart based on mode or intent
+            if ((testMode === 'subject' || testIntent === 'subject') && selectedSubject) {
+                // Retry starting subject test
+                const data = await api.startSubjectTest(selectedExam, selectedSubject);
+                setLoading(false);
+                setSessionId(data.sessionId);
+                setQuestions(data.questions);
+                setTestPattern(data.pattern);
+                setTimeLeft(data.pattern.duration * 60 || 3600);
+                setShowInstructions(true); // Show instructions first
+                setTestMode('subject'); // Ensure mode is set
+                toast.success(`Subject Test Ready: ${selectedSubject} `);
+            } else if ((testMode === 'topic' || testIntent === 'topic') && selectedSubject && selectedTopic) {
+                // Retry starting topic test
+                const data = await api.startTopicTest(selectedExam, selectedSubject, selectedTopic);
+                setLoading(false);
+                setSessionId(data.sessionId);
+                setQuestions(data.questions);
+                setTestPattern(data.pattern);
+                setTimeLeft(data.pattern.duration * 60 || 1800);
+                setShowInstructions(true); // Show instructions first
+                setTestMode('topic'); // Ensure mode is set
+                toast.success(`Topic Test Ready: ${selectedTopic} `);
+            } else if (testMode === 'random' && pendingCustomConfig) {
+                // Retry starting custom test
+                const data = await api.startCustomTest({
+                    examType: selectedExam,
+                    ...pendingCustomConfig
+                });
+                setSessionId(data.sessionId);
+                setQuestions(data.questions);
+                setTestPattern(data.pattern);
+                setShowInstructions(true);
+                setTestMode('random');
+                setTimeLeft((pendingCustomConfig.duration || 30) * 60);
+                toast.success('Custom Test Started!');
+            } else {
+                // Retry starting full test (Default)
+                const data = await api.startFullTest(selectedExam);
+                setTestPattern(data.pattern);
+                setShowInstructions(true);
+                setSessionId(data.sessionId);
+                setQuestions(data.questions);
+                setTimeLeft(data.pattern.duration * 60);
+                setTestMode('full'); // Ensure mode is set
+            }
 
         } catch (error) {
             console.error('Failed to start new test:', error);
             toast.error('Failed to start new test');
             setTestMode(null);
         } finally {
-            setLoading(false);
             setLoading(false);
         }
     };
@@ -297,18 +351,120 @@ const Tests = () => {
 
     // Trigger fetch when mode is selected (for non-full tests)
     useEffect(() => {
-        if (testMode && testMode !== 'full' && testMode !== 'topic-wise') {
+        if (testMode && testMode !== 'full' && testMode !== 'topic' && testMode !== 'topic-wise' && testMode !== 'subject' && testMode !== 'random') {
             fetchQuestions();
         }
     }, [testMode, selectedExam]);
 
-    // Handle topic selection
-    const handleTopicSelect = (topic) => {
-        setSelectedTopic(topic);
-        setShowTopicModal(false);
-        setTimeout(() => {
-            fetchQuestions();
-        }, 100);
+
+
+    // Handle subject selection
+    const handleSubjectSelect = async (subject) => {
+        setIsSubjectModalOpen(false);
+        setSelectedSubject(subject);
+
+        // If Topic Wise Test, open Topic Modal next
+        if (testIntent === 'topic') {
+            setSubjectForTopic(subject);
+            setTimeout(() => setIsTopicModalOpen(true), 100);
+            return;
+        }
+
+        // Else Start Subject Test immediately
+        try {
+            setLoading(true);
+            setTestMode('subject'); // Set mode to subject
+
+            // Start Subject Test Session
+            const data = await api.startSubjectTest(selectedExam, subject);
+
+            // Set Session Data & Pattern for Instructions
+            setSessionId(data.sessionId);
+            setQuestions(data.questions);
+            setTestPattern(data.pattern); // Set pattern for instructions
+            setShowInstructions(true);    // Show instructions first
+            setTimeLeft(data.pattern.duration * 60 || 3600);
+
+            toast.success(`Subject Test Ready: ${subject} `);
+        } catch (error) {
+            console.error('Failed to start subject test:', error);
+
+            // Handle Active Session Error
+            const errData = error.data || {};
+            if (errData.activeSessionId || errData.sessionId) {
+                setActiveSessionId(errData.activeSessionId || errData.sessionId);
+                setShowResumeModal(true);
+            } else {
+                toast.error(error.message || 'Failed to start subject test');
+            }
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleTopicSelect = async (subject, topic) => {
+        try {
+            setLoading(true);
+            setIsTopicModalOpen(false);
+            setSelectedTopic(topic); // Keep track of selected topic
+
+            const data = await api.startTopicTest(selectedExam, subject, topic);
+            setSessionId(data.sessionId);
+            setTestMode('topic');
+            setQuestions(data.questions);
+            setCurrentQuestionIndex(0);
+            setTimeLeft(data.pattern?.duration * 60 || 1800);
+            setTestPattern(data.pattern);
+            setShowInstructions(true); // Show instructions for topic test
+            toast.success(`Starting ${topic} Test!`);
+
+        } catch (error) {
+            console.error("Failed to start topic test:", error);
+            if (error.data && error.data.sessionId) {
+                toast.error("Active session found!");
+                setActiveSessionId(error.data.sessionId);
+                setShowResumeModal(true);
+            } else {
+                toast.error(error.message || "Failed to start topic test");
+            }
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleCustomTestStart = async (config) => {
+        try {
+            setLoading(true);
+            setIsCustomModalOpen(false);
+
+            const data = await api.startCustomTest({
+                examType: selectedExam,
+                ...config
+            });
+
+            setSessionId(data.sessionId);
+            setTestMode('random'); // We can treat it like topic/subject logic-wise
+            setQuestions(data.questions);
+            setCurrentQuestionIndex(0);
+            setTimeLeft(config.duration * 60);
+            setTestPattern(data.pattern);
+            setShowInstructions(true); // Show instructions for custom test
+            toast.success('Custom Test Started!');
+
+        } catch (error) {
+            console.error("Failed to start custom test:", error);
+            if (error.data && error.data.sessionId) {
+                toast.error("Active session found!");
+                setActiveSessionId(error.data.sessionId);
+                setPendingCustomConfig(config); // Save for retry
+                setTestMode('random'); // Mark intent
+                setShowResumeModal(true);
+            } else {
+                toast.error(error.message || "Failed to start custom test");
+            }
+        } finally {
+            setLoading(false);
+        }
     };
 
     // Time Tracking Refs
@@ -338,7 +494,7 @@ const Tests = () => {
             const newTime = oldTime + elapsedSec;
 
             // Sync to backend if session active
-            if (sessionId && testMode === 'full') {
+            if (sessionId && (testMode === 'full' || testMode === 'subject' || testMode === 'topic' || testMode === 'random')) {
                 // Send accumulated time, not just delta
                 api.saveResponse(sessionId, qId, currentData.answer, newTime, currentData.marked)
                     .catch(e => console.error("Auto-save time failed", e));
@@ -378,7 +534,7 @@ const Tests = () => {
             const newTime = oldTime + elapsedSec;
 
             // Save response to backend
-            if (sessionId && testMode === 'full') {
+            if (sessionId && (testMode === 'full' || testMode === 'subject' || testMode === 'topic' || testMode === 'random')) {
                 api.saveResponse(sessionId, qId, value, newTime, currentData.marked)
                     .catch(err => console.error('Failed to save response:', err));
             }
@@ -395,7 +551,7 @@ const Tests = () => {
             const currentData = prev[qId] || {};
             const newVal = !currentData.marked;
 
-            if (sessionId && testMode === 'full') {
+            if (sessionId && (testMode === 'full' || testMode === 'subject' || testMode === 'topic' || testMode === 'random')) {
                 // Use existing time, don't update time on mark toggle
                 api.saveResponse(sessionId, qId, currentData.answer, currentData.timeTaken || 0, newVal)
                     .catch(e => console.error('Failed to update mark:', e));
@@ -413,7 +569,7 @@ const Tests = () => {
             const currentData = prev[qId] || {};
             // Just clear answer, keep time and mark? Usually yes.
 
-            if (sessionId && testMode === 'full') {
+            if (sessionId && (testMode === 'full' || testMode === 'subject' || testMode === 'topic' || testMode === 'random')) {
                 api.saveResponse(sessionId, qId, null, currentData.timeTaken || 0, currentData.marked)
                     .catch(e => console.error('Failed to clear:', e));
             }
@@ -435,14 +591,15 @@ const Tests = () => {
         setIsActive(false);
         setLoading(true);
 
-        if (sessionId && testMode === 'full') {
+        if (sessionId && (testMode === 'full' || testMode === 'subject' || testMode === 'topic' || testMode === 'random')) {
             try {
                 const result = await api.submitTest(sessionId);
                 setTestResults(result);
                 toast.success(`Test Submitted Successfully!`);
             } catch (error) {
                 console.error('Failed to submit test:', error);
-                toast.error('Failed to submit test');
+                const errorMsg = error.response?.data?.details || error.response?.data?.message || 'Failed to submit test';
+                toast.error(`Error: ${errorMsg} `);
             } finally {
                 setLoading(false);
             }
@@ -460,8 +617,8 @@ const Tests = () => {
 
     // Handle topic-wise test mode
     const handleTopicWiseClick = () => {
-        setTestMode('topic-wise');
-        setShowTopicModal(true);
+        setTestIntent('topic');
+        setIsSubjectModalOpen(true);
     };
 
     // Show Results Screen
@@ -551,7 +708,10 @@ const Tests = () => {
 
                     {/* Subject Wise Card */}
                     <button
-                        onClick={() => setTestMode('subject')}
+                        onClick={() => {
+                            setTestIntent('subject');
+                            setIsSubjectModalOpen(true);
+                        }}
                         className="bg-white p-6 rounded-2xl shadow-sm hover:shadow-xl border border-gray-200 hover:border-indigo-500 text-left transition-all group cursor-pointer h-full flex flex-col"
                     >
                         <div className="h-12 w-12 bg-indigo-100 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
@@ -584,21 +744,23 @@ const Tests = () => {
                     </button>
 
                     {/* Random Questions Card */}
-                    <button
-                        onClick={() => setTestMode('random')}
-                        className="bg-white p-6 rounded-2xl shadow-sm hover:shadow-xl border border-gray-200 hover:border-emerald-500 text-left transition-all group cursor-pointer h-full flex flex-col"
+                    <div
+                        onClick={() => setIsCustomModalOpen(true)}
+                        className="group relative overflow-hidden bg-white rounded-2xl p-6 shadow-sm border border-gray-100 hover:shadow-xl transition-all duration-300 cursor-pointer"
                     >
-                        <div className="h-12 w-12 bg-emerald-100 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                            <Shuffle size={24} className="text-emerald-600" />
+                        <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                            <Dna size={80} className="text-violet-600 rotate-12" />
                         </div>
-                        <h2 className="text-xl font-bold text-gray-900 mb-2">Random Mix</h2>
-                        <p className="text-sm text-gray-500 leading-relaxed mb-4 flex-1">
-                            Quick practice with a random mix of questions to keep you on your toes.
-                        </p>
-                        <div className="flex items-center gap-2 text-emerald-600 text-sm font-semibold group-hover:translate-x-1 transition-transform">
-                            Start Random Quiz <ChevronRight size={16} />
+                        <div className="w-12 h-12 bg-violet-100 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
+                            <Dna className="text-violet-600" size={24} />
                         </div>
-                    </button>
+                        <h3 className="text-xl font-bold text-gray-900 mb-2 group-hover:text-violet-600 transition-colors">Custom Drill</h3>
+                        <p className="text-gray-600 text-sm mb-4">Customize your challenge. Mix subjects and set your own limits.</p>
+                        <div className="flex items-center text-violet-600 font-semibold text-sm group-hover:translate-x-1 transition-transform">
+                            Start Custom Drill
+                            <ArrowRight size={16} className="ml-1" />
+                        </div>
+                    </div>
 
                     {/* Revision Test Card */}
                     <button
@@ -636,14 +798,26 @@ const Tests = () => {
                 </div>
 
                 {/* Topic Selection Modal */}
+                <SubjectSelectionModal
+                    isOpen={isSubjectModalOpen}
+                    onClose={() => setIsSubjectModalOpen(false)}
+                    onSelect={(subject) => handleSubjectSelect(subject)}
+                    examType={selectedExam}
+                />
+
                 <TopicSelectionModal
-                    isOpen={showTopicModal}
-                    onClose={() => {
-                        setShowTopicModal(false);
-                        setTestMode(null);
-                    }}
-                    examName={selectedExam}
-                    onTopicSelect={handleTopicSelect}
+                    isOpen={isTopicModalOpen}
+                    onClose={() => setIsTopicModalOpen(false)}
+                    subject={subjectForTopic}
+                    onSelect={(topic) => handleTopicSelect(subjectForTopic, topic)}
+                    examType={selectedExam}
+                />
+
+                <CustomTestModal
+                    isOpen={isCustomModalOpen}
+                    onClose={() => setIsCustomModalOpen(false)}
+                    examType={selectedExam}
+                    onStartTest={handleCustomTestStart}
                 />
             </div>
         );
@@ -681,11 +855,14 @@ const Tests = () => {
         onDiscard: handleDiscardSession,
         onSaveAndExit: handleSaveAndExit,
         sessionId,
-        testMode
+        testMode,
+        title: testMode === 'subject' ? `Subject Test: ${selectedSubject} ` :
+            testMode === 'topic-wise' ? `Topic: ${selectedTopic} ` :
+                testMode === 'revision' ? 'Revision Test' : 'Quick Quiz'
     };
 
     // Render based on mode
-    if (testMode !== 'full') {
+    if (testMode !== 'full' && testMode !== 'subject' && testMode !== 'topic') {
         return <ShortTestUI {...uiProps} />;
     }
 

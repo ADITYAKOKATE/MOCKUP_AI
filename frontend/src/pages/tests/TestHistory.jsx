@@ -104,9 +104,30 @@ const TestHistory = () => {
                                     {/* Card Header */}
                                     <div className="flex justify-between items-start mb-6">
                                         <div>
-                                            <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold bg-gray-100 text-gray-600 mb-2">
-                                                {attempt.testType === 'topic-wise' && attempt.topic ? `Topic: ${attempt.topic}` : attempt.examType}
-                                            </span>
+                                            {(() => {
+                                                const type = attempt.testType?.toLowerCase();
+                                                let badgeStyle = "bg-gray-100 text-gray-700 border-gray-200";
+                                                let label = attempt.examType;
+
+                                                if (type === 'subject') {
+                                                    badgeStyle = "bg-purple-50 text-purple-700 border-purple-100";
+                                                    label = `Subject: ${attempt.subject}`;
+                                                } else if (type === 'topic-wise' || type === 'topic') {
+                                                    badgeStyle = "bg-teal-50 text-teal-700 border-teal-100";
+                                                    label = `Topic: ${attempt.topic}`;
+                                                } else if (type === 'full') {
+                                                    badgeStyle = "bg-blue-50 text-blue-700 border-blue-100";
+                                                } else if (type === 'random') {
+                                                    badgeStyle = "bg-violet-50 text-violet-700 border-violet-100";
+                                                    label = attempt.subject === 'Mixed' ? "Custom Drill (Mixed)" : `Custom Drill: ${attempt.subject}`;
+                                                }
+
+                                                return (
+                                                    <span className={`inline-flex items-center px-3 py-1 rounded-lg text-xs font-bold border ${badgeStyle} mb-2`}>
+                                                        {label}
+                                                    </span>
+                                                );
+                                            })()}
                                             <div className="flex items-center gap-2 text-gray-400 text-sm font-medium">
                                                 <Calendar size={14} />
                                                 {formatDate(attempt.createdAt)}
