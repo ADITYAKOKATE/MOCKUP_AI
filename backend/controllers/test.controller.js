@@ -643,18 +643,26 @@ exports.startTopicTest = async (req, res) => {
         }
 
         // Normalize Exam Name
+        // Normalize Exam Name
         const metaKey = Object.keys(EXAMS).find(key => EXAMS[key] === examType) ||
-            Object.keys(EXAMS).find(key => key === examType);
+            Object.keys(EXAMS).find(key => key.toLowerCase() === examType.toLowerCase().replace(/ /g, '-'));
 
-        let savedExamName = EXAMS[metaKey];
-        if (!savedExamName) {
-            savedExamName = examType.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-            if (!savedExamName.includes(' ')) savedExamName = examType;
-        } else if (savedExamName === 'GATE' && examType.toUpperCase().startsWith('GATE')) {
-            const parts = examType.split(/[- ]/);
-            if (parts.length > 1) {
-                const branch = parts[1].toUpperCase();
-                savedExamName = `GATE ${branch}`;
+        let savedExamName = metaKey ? EXAMS[metaKey] : examType;
+
+        // Final fallback normalization if not in keys
+        if (!metaKey) {
+            if (examType.toLowerCase() === 'jee main' || examType.toLowerCase() === 'jee-main') savedExamName = 'JEE Main';
+            else if (examType.toLowerCase() === 'neet') savedExamName = 'NEET';
+            else savedExamName = examType.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        }
+
+        if (savedExamName.toUpperCase().startsWith('GATE')) {
+            // Ensure GATE + Branch format
+            if (savedExamName === 'GATE') {
+                const parts = examType.split(/[- ]/);
+                if (parts.length > 1 && parts[1].length <= 3) {
+                    savedExamName = `GATE ${parts[1].toUpperCase()}`;
+                }
             }
         }
 
@@ -770,13 +778,23 @@ exports.startCustomTest = async (req, res) => {
 
         let savedExamName = examType;
         const metaKey = Object.keys(EXAMS).find(key => EXAMS[key] === examType) ||
-            Object.keys(EXAMS).find(key => key === examType);
+            Object.keys(EXAMS).find(key => key.toLowerCase() === examType.toLowerCase().replace(/ /g, '-'));
 
         if (metaKey) {
             savedExamName = EXAMS[metaKey];
         } else {
-            savedExamName = examType.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-            if (savedExamName.toUpperCase().includes('GATE') && !savedExamName.split(' ')[1]) {
+            if (examType.toLowerCase() === 'jee main' || examType.toLowerCase() === 'jee-main') savedExamName = 'JEE Main';
+            else if (examType.toLowerCase() === 'neet') savedExamName = 'NEET';
+            else savedExamName = examType.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        }
+
+        if (savedExamName.toUpperCase().startsWith('GATE')) {
+            if (savedExamName === 'GATE') {
+                // Try to keep branch info if present in input
+                const parts = examType.split(/[- ]/);
+                if (parts.length > 1 && parts[1].length <= 3) {
+                    savedExamName = `GATE ${parts[1].toUpperCase()}`;
+                }
             }
         }
 
