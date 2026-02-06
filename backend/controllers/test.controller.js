@@ -1496,4 +1496,74 @@ exports.getUserAttempts = async (req, res) => {
     }
 };
 
+
+/**
+ * Get exam pattern (instructions) without starting session
+ * GET /api/test/pattern?examType=jee-main
+ */
+exports.getExamPattern = async (req, res) => {
+    try {
+        const { examType } = req.query;
+
+        console.log(`[GetPattern] Request for exam: "${examType}"`);
+
+        if (!examType) {
+            return res.status(400).json({ message: 'Exam type is required' });
+        }
+
+        // Get exam pattern (Try exact match first, then case-insensitive)
+        let pattern = await ExamPattern.findOne({ examName: examType, active: true });
+
+        if (!pattern) {
+            pattern = await ExamPattern.findOne({
+                examName: { $regex: new RegExp(`^${examType}$`, 'i') },
+                active: true
+            });
+        }
+
+        // Normalization Fallbacks (Similar to startFullTest)
+        if (!pattern) {
+            const variations = {
+                'JEE Mains': 'JEE Main',
+                'JEE_MAIN': 'JEE Main',
+                'jee-main': 'JEE Main',
+                'gate-cs': 'GATE CS',
+                'neet-ug': 'NEET',
+                'GATE': 'GATE CS',
+                'NEET UG': 'NEET'
+            };
+
+            if (variations[examType]) {
+                pattern = await ExamPattern.findOne({ examName: variations[examType], active: true });
+            }
+        }
+
+        if (!pattern) {
+            const normalizedType = examType.replace(/-/g, ' ');
+            pattern = await ExamPattern.findOne({
+                examName: { $regex: new RegExp(`^${normalizedType}$`, 'i') },
+                active: true
+            });
+        }
+
+        if (!pattern) {
+            return res.status(404).json({ message: 'Exam pattern not found' });
+        }
+
+        res.json({
+            displayName: pattern.displayName,
+            totalQuestions: pattern.totalQuestions,
+            questionsToAttempt: pattern.questionsToAttempt,
+            totalMarks: pattern.totalMarks,
+            duration: pattern.duration,
+            instructions: pattern.instructions,
+            negativeMarking: pattern.negativeMarking
+        });
+
+    } catch (error) {
+        console.error('Error fetching exam pattern:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
 module.exports = exports;

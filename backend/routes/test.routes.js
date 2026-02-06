@@ -58,4 +58,9 @@ router.get('/results/:attemptId', auth, testController.getTestResults);
 // @access  Private
 router.get('/history', auth, testController.getUserAttempts);
 
+// @route   GET api/test/pattern
+// @desc    Get exam pattern details
+// @access  Private
+router.get('/pattern', auth, testController.getExamPattern);
+
 module.exports = router;

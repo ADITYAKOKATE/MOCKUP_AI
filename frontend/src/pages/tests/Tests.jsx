@@ -14,6 +14,45 @@ import { ChevronRight, LayoutGrid, Clock, BookOpen, Shuffle, Sparkles, Target, Z
 import TestResults from './TestResults.jsx';
 import SubjectSelectionModal from './SubjectSelectionModal.jsx';
 
+const TestCard = ({ title, description, icon: Icon, color, onClick, actionText, loading }) => {
+    const colorClasses = {
+        blue: { bg: 'bg-blue-100', text: 'text-blue-600', border: 'hover:border-blue-500' },
+        indigo: { bg: 'bg-indigo-100', text: 'text-indigo-600', border: 'hover:border-indigo-500' },
+        teal: { bg: 'bg-teal-100', text: 'text-teal-600', border: 'hover:border-teal-500' },
+        violet: { bg: 'bg-violet-100', text: 'text-violet-600', border: 'hover:border-violet-500' },
+        orange: { bg: 'bg-orange-100', text: 'text-orange-600', border: 'hover:border-orange-500' },
+        purple: { bg: 'bg-purple-100', text: 'text-purple-600', border: 'hover:border-purple-500' },
+    };
+
+    const currentString = colorClasses[color] || colorClasses.blue;
+
+    return (
+        <button
+            onClick={onClick}
+            disabled={loading}
+            className={`group relative overflow-hidden bg-white p-6 rounded-2xl shadow-sm hover:shadow-xl border border-gray-200 ${currentString.border} text-left transition-all duration-300 cursor-pointer h-full flex flex-col disabled:opacity-50`}
+        >
+            {/* Background Watermark Icon */}
+            <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                <Icon size={80} className={`${currentString.text} rotate-12`} />
+            </div>
+
+            <div className={`h-12 w-12 ${currentString.bg} rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300 z-10 relative`}>
+                <Icon size={24} className={currentString.text} />
+            </div>
+
+            <h2 className={`text-xl font-bold text-gray-900 mb-2 group-hover:${currentString.text} transition-colors z-10 relative`}>{title}</h2>
+            <p className="text-sm text-gray-500 leading-relaxed mb-4 flex-1 z-10 relative">
+                {description}
+            </p>
+
+            <div className={`flex items-center gap-2 ${currentString.text} text-sm font-semibold group-hover:translate-x-1 transition-transform z-10 relative`}>
+                {actionText} <ChevronRight size={16} />
+            </div>
+        </button>
+    );
+};
+
 const Tests = () => {
     const { selectedExam } = useAuth();
     const navigate = useNavigate();
@@ -109,33 +148,24 @@ const Tests = () => {
     }, [sessionId, isActive, responses]);
 
     // Handle full test click
+    // Handle full test click
     const handleFullTestClick = async () => {
         try {
             setLoading(true);
             setTestMode('full');
             setTestResults(null);
 
-            // Attempt to start - backend will match pattern or return 400 if active
-            const data = await api.startFullTest(selectedExam);
+            // Fetch pattern only - do not start session yet
+            const pattern = await api.getExamPattern(selectedExam);
 
-            // If successful immediately (no active session conflict)
-            setTestPattern(data.pattern);
+            setTestPattern(pattern);
             setShowInstructions(true);
-            setSessionId(data.sessionId);
-            setQuestions(data.questions);
-            setTimeLeft(data.pattern.duration * 60);
-
+            setSessionId(null); // No session yet
+            // setQuestions([]); // Don't allow questions yet
+            // setTimeLeft(pattern.duration * 60); // Will be set on start
         } catch (error) {
-            console.error('Failed to start full test:', error);
-
-            // Check if it's an "Active Session" conflict
-            if (error.data && error.data.sessionId) {
-                setActiveSessionId(error.data.sessionId);
-                setShowResumeModal(true);
-                return;
-            }
-
-            toast.error(error.message || 'Failed to start test');
+            console.error('Failed to fetch exam pattern:', error);
+            toast.error(error.message || 'Failed to details');
             setTestMode(null);
         } finally {
             setLoading(false);
@@ -178,71 +208,97 @@ const Tests = () => {
     };
 
     // Handle Start New Session (Discard Old)
-    const handleStartNewSession = async () => {
-        try {
-            setLoading(true);
-            setShowResumeModal(false);
+    const handleStartNewSession = async (shouldShowInstructions = true) => {
+        setLoading(true);
+        setShowResumeModal(false);
 
-            if (activeSessionId) {
+        let currentActiveId = activeSessionId;
+        let retryCount = 0;
+        const MAX_RETRIES = 5;
+
+        try {
+            while (retryCount < MAX_RETRIES) {
+                // 1. Discard current conflicting session if known
+                if (currentActiveId) {
+                    try {
+                        console.log(`[Tests] Discarding blocking session: ${currentActiveId}`);
+                        await api.discardSession(currentActiveId);
+                    } catch (e) {
+                        console.warn("Session discard failed (maybe already gone), continuing...", e);
+                    }
+                }
+
+                // 2. Attempt to start the requested test
                 try {
-                    await api.discardSession(activeSessionId);
-                } catch (e) {
-                    console.warn("Session discard failed or already gone, proceeding...", e);
+                    let data;
+                    // Determine which test to restart based on mode or intent
+                    if ((testMode === 'subject' || testIntent === 'subject') && selectedSubject) {
+                        data = await api.startSubjectTest(selectedExam, selectedSubject);
+                        setTestMode('subject');
+                        toast.success(`Subject Test Ready: ${selectedSubject}`);
+                    } else if ((testMode === 'topic' || testIntent === 'topic') && selectedSubject && selectedTopic) {
+                        data = await api.startTopicTest(selectedExam, selectedSubject, selectedTopic);
+                        setTestMode('topic');
+                        toast.success(`Topic Test Ready: ${selectedTopic}`);
+                    } else if (testMode === 'random' && pendingCustomConfig) {
+                        data = await api.startCustomTest({
+                            examType: selectedExam,
+                            ...pendingCustomConfig
+                        });
+                        setTestMode('random');
+                        toast.success('Custom Test Started!');
+                    } else {
+                        // Default to Full Test
+                        data = await api.startFullTest(selectedExam);
+                        setTestMode('full');
+                    }
+
+                    // 3. Success! Set state and break loop
+                    setSessionId(data.sessionId);
+                    setQuestions(data.questions);
+                    setTestPattern(data.pattern);
+
+                    // Specific logic for duration
+                    if (testMode === 'random' && pendingCustomConfig) {
+                        setTimeLeft((pendingCustomConfig.duration || 30) * 60);
+                    } else if (data.pattern && data.pattern.duration) {
+                        setTimeLeft(data.pattern.duration * 60);
+                    } else {
+                        setTimeLeft(3600); // Fallback
+                    }
+
+                    if (shouldShowInstructions) {
+                        setShowInstructions(true);
+                    } else {
+                        // If instructions not needed, start immediately
+                        setShowInstructions(false);
+                        setIsActive(true);
+                    }
+
+                    setLoading(false);
+                    return; // Exit function
+
+                } catch (error) {
+                    console.error('Start attempt failed:', error);
+
+                    // 4. Check if it's ANOTHER active session conflict
+                    if (error.data && error.data.sessionId) {
+                        console.warn(`[Tests] Found another active session: ${error.data.sessionId}. Retrying...`);
+                        currentActiveId = error.data.sessionId; // Update ID for next loop
+                        retryCount++;
+                    } else {
+                        // Real error (network, validation, etc.) - Throw to outer catch
+                        throw error;
+                    }
                 }
             }
 
-            // Determine which test to restart based on mode or intent
-            if ((testMode === 'subject' || testIntent === 'subject') && selectedSubject) {
-                // Retry starting subject test
-                const data = await api.startSubjectTest(selectedExam, selectedSubject);
-                setLoading(false);
-                setSessionId(data.sessionId);
-                setQuestions(data.questions);
-                setTestPattern(data.pattern);
-                setTimeLeft(data.pattern.duration * 60 || 3600);
-                setShowInstructions(true); // Show instructions first
-                setTestMode('subject'); // Ensure mode is set
-                toast.success(`Subject Test Ready: ${selectedSubject} `);
-            } else if ((testMode === 'topic' || testIntent === 'topic') && selectedSubject && selectedTopic) {
-                // Retry starting topic test
-                const data = await api.startTopicTest(selectedExam, selectedSubject, selectedTopic);
-                setLoading(false);
-                setSessionId(data.sessionId);
-                setQuestions(data.questions);
-                setTestPattern(data.pattern);
-                setTimeLeft(data.pattern.duration * 60 || 1800);
-                setShowInstructions(true); // Show instructions first
-                setTestMode('topic'); // Ensure mode is set
-                toast.success(`Topic Test Ready: ${selectedTopic} `);
-            } else if (testMode === 'random' && pendingCustomConfig) {
-                // Retry starting custom test
-                const data = await api.startCustomTest({
-                    examType: selectedExam,
-                    ...pendingCustomConfig
-                });
-                setSessionId(data.sessionId);
-                setQuestions(data.questions);
-                setTestPattern(data.pattern);
-                setShowInstructions(true);
-                setTestMode('random');
-                setTimeLeft((pendingCustomConfig.duration || 30) * 60);
-                toast.success('Custom Test Started!');
-            } else {
-                // Retry starting full test (Default)
-                const data = await api.startFullTest(selectedExam);
-                setTestPattern(data.pattern);
-                setShowInstructions(true);
-                setSessionId(data.sessionId);
-                setQuestions(data.questions);
-                setTimeLeft(data.pattern.duration * 60);
-                setTestMode('full'); // Ensure mode is set
-            }
+            throw new Error("Too many active sessions. Please clear your history or contact support.");
 
         } catch (error) {
-            console.error('Failed to start new test:', error);
-            toast.error('Failed to start new test');
+            console.error('Failed to start new test after retries:', error);
+            toast.error(error.message || 'Failed to start new test');
             setTestMode(null);
-        } finally {
             setLoading(false);
         }
     };
@@ -289,10 +345,76 @@ const Tests = () => {
     };
 
 
+    // Attempt to start test (Gentle - Checks for conflict)
+    const attemptStartTest = async () => {
+        try {
+            setLoading(true);
+            let data;
+
+            // 1. Try to start the requested test directly
+            if ((testMode === 'subject' || testIntent === 'subject') && selectedSubject) {
+                data = await api.startSubjectTest(selectedExam, selectedSubject);
+                setTestMode('subject');
+                toast.success(`Subject Test Ready: ${selectedSubject}`);
+            } else if ((testMode === 'topic' || testIntent === 'topic') && selectedSubject && selectedTopic) {
+                data = await api.startTopicTest(selectedExam, selectedSubject, selectedTopic);
+                setTestMode('topic');
+                toast.success(`Topic Test Ready: ${selectedTopic}`);
+            } else if (testMode === 'random' && pendingCustomConfig) {
+                data = await api.startCustomTest({
+                    examType: selectedExam,
+                    ...pendingCustomConfig
+                });
+                setTestMode('random');
+                toast.success('Custom Test Started!');
+            } else {
+                // Default to Full Test
+                data = await api.startFullTest(selectedExam);
+                setTestMode('full');
+            }
+
+            // 2. Success!
+            setSessionId(data.sessionId);
+            setQuestions(data.questions);
+            setTestPattern(data.pattern);
+
+            if (testMode === 'random' && pendingCustomConfig) {
+                setTimeLeft((pendingCustomConfig.duration || 30) * 60);
+            } else if (data.pattern && data.pattern.duration) {
+                setTimeLeft(data.pattern.duration * 60);
+            } else {
+                setTimeLeft(3600);
+            }
+
+            setShowInstructions(false);
+            setIsActive(true);
+
+        } catch (error) {
+            console.error('Start attempt failed:', error);
+
+            // 3. Check for Active Session Conflict
+            if (error.data && error.data.sessionId) {
+                console.warn(`[Tests] Active session found: ${error.data.sessionId}`);
+                setActiveSessionId(error.data.sessionId);
+                setShowResumeModal(true); // Show the choice to user!
+            } else {
+                toast.error(error.message || 'Failed to start test');
+            }
+        } finally {
+            setLoading(false);
+        }
+    };
+
     // Handle instructions confirmation
-    const handleStartTest = () => {
-        setShowInstructions(false);
-        setIsActive(true);
+    const handleStartTest = async () => {
+        if (!sessionId) {
+            // Session not started yet (deferred start)
+            await attemptStartTest();
+        } else {
+            // Session already active
+            setShowInstructions(false);
+            setIsActive(true);
+        }
     };
 
     // Handle cancel from instructions
@@ -689,112 +811,69 @@ const Tests = () => {
             <div className="h-full w-full bg-gray-50 flex items-center justify-center p-6 overflow-hidden">
                 <div className="max-w-6xl w-full grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {/* Full Test Card */}
-                    <button
+                    <TestCard
+                        title="Full Test"
+                        description="Simulate a real exam environment with proper pattern, timer, and detailed analytics."
+                        icon={LayoutGrid}
+                        color="blue"
                         onClick={handleFullTestClick}
-                        disabled={loading}
-                        className="bg-white p-6 rounded-2xl shadow-sm hover:shadow-xl border border-gray-200 hover:border-blue-500 text-left transition-all group cursor-pointer h-full flex flex-col disabled:opacity-50"
-                    >
-                        <div className="h-12 w-12 bg-blue-100 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                            <LayoutGrid size={24} className="text-blue-600" />
-                        </div>
-                        <h2 className="text-xl font-bold text-gray-900 mb-2">Full Test</h2>
-                        <p className="text-sm text-gray-500 leading-relaxed mb-4 flex-1">
-                            Simulate a real exam environment with proper pattern, timer, and detailed analytics.
-                        </p>
-                        <div className="flex items-center gap-2 text-blue-600 text-sm font-semibold group-hover:translate-x-1 transition-transform">
-                            {loading ? 'Loading...' : 'Start Full Test'} <ChevronRight size={16} />
-                        </div>
-                    </button>
+                        actionText={loading ? 'Loading...' : 'Start Full Test'}
+                        loading={loading}
+                    />
 
                     {/* Subject Wise Card */}
-                    <button
+                    <TestCard
+                        title="Subject Wise"
+                        description="Focus on specific subjects to strengthen your weak areas with targeted practice questions."
+                        icon={BookOpen}
+                        color="indigo"
                         onClick={() => {
                             setTestIntent('subject');
                             setIsSubjectModalOpen(true);
                         }}
-                        className="bg-white p-6 rounded-2xl shadow-sm hover:shadow-xl border border-gray-200 hover:border-indigo-500 text-left transition-all group cursor-pointer h-full flex flex-col"
-                    >
-                        <div className="h-12 w-12 bg-indigo-100 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                            <BookOpen size={24} className="text-indigo-600" />
-                        </div>
-                        <h2 className="text-xl font-bold text-gray-900 mb-2">Subject Wise</h2>
-                        <p className="text-sm text-gray-500 leading-relaxed mb-4 flex-1">
-                            Focus on specific subjects to strengthen your weak areas with targeted practice questions.
-                        </p>
-                        <div className="flex items-center gap-2 text-indigo-600 text-sm font-semibold group-hover:translate-x-1 transition-transform">
-                            Start Subject Test <ChevronRight size={16} />
-                        </div>
-                    </button>
+                        actionText="Start Subject Test"
+                    />
 
                     {/* Topic-wise Test Card */}
-                    <button
+                    <TestCard
+                        title="Topic-wise Test"
+                        description="Master specific topics with focused practice. Select from available topics and start learning."
+                        icon={Target}
+                        color="teal"
                         onClick={handleTopicWiseClick}
-                        className="bg-white p-6 rounded-2xl shadow-sm hover:shadow-xl border border-gray-200 hover:border-teal-500 text-left transition-all group cursor-pointer h-full flex flex-col"
-                    >
-                        <div className="h-12 w-12 bg-teal-100 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                            <Target size={24} className="text-teal-600" />
-                        </div>
-                        <h2 className="text-xl font-bold text-gray-900 mb-2">Topic-wise Test</h2>
-                        <p className="text-sm text-gray-500 leading-relaxed mb-4 flex-1">
-                            Master specific topics with focused practice. Select from available topics and start learning.
-                        </p>
-                        <div className="flex items-center gap-2 text-teal-600 text-sm font-semibold group-hover:translate-x-1 transition-transform">
-                            Choose Topic <ChevronRight size={16} />
-                        </div>
-                    </button>
+                        actionText="Choose Topic"
+                    />
 
-                    {/* Random Questions Card */}
-                    <div
+                    {/* Custom Drill Card */}
+                    <TestCard
+                        title="Custom Drill"
+                        description="Customize your challenge. Mix subjects and set your own limits."
+                        icon={Dna}
+                        color="violet"
                         onClick={() => setIsCustomModalOpen(true)}
-                        className="group relative overflow-hidden bg-white rounded-2xl p-6 shadow-sm border border-gray-100 hover:shadow-xl transition-all duration-300 cursor-pointer"
-                    >
-                        <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                            <Dna size={80} className="text-violet-600 rotate-12" />
-                        </div>
-                        <div className="w-12 h-12 bg-violet-100 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
-                            <Dna className="text-violet-600" size={24} />
-                        </div>
-                        <h3 className="text-xl font-bold text-gray-900 mb-2 group-hover:text-violet-600 transition-colors">Custom Drill</h3>
-                        <p className="text-gray-600 text-sm mb-4">Customize your challenge. Mix subjects and set your own limits.</p>
-                        <div className="flex items-center text-violet-600 font-semibold text-sm group-hover:translate-x-1 transition-transform">
-                            Start Custom Drill
-                            <ArrowRight size={16} className="ml-1" />
-                        </div>
-                    </div>
+                        actionText="Start Custom Drill"
+                        isCustomDrill={true} // Just in case we need specific override, but style should be same
+                    />
 
                     {/* Revision Test Card */}
-                    <button
+                    <TestCard
+                        title="Revision Test"
+                        description="High-importance questions for last-minute revision before your exam. Quick and effective!"
+                        icon={Zap}
+                        color="orange"
                         onClick={() => setTestMode('revision')}
-                        className="bg-white p-6 rounded-2xl shadow-sm hover:shadow-xl border border-gray-200 hover:border-orange-500 text-left transition-all group cursor-pointer h-full flex flex-col"
-                    >
-                        <div className="h-12 w-12 bg-orange-100 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                            <Zap size={24} className="text-orange-600" />
-                        </div>
-                        <h2 className="text-xl font-bold text-gray-900 mb-2">Revision Test</h2>
-                        <p className="text-sm text-gray-500 leading-relaxed mb-4 flex-1">
-                            High-importance questions for last-minute revision before your exam. Quick and effective!
-                        </p>
-                        <div className="flex items-center gap-2 text-orange-600 text-sm font-semibold group-hover:translate-x-1 transition-transform">
-                            Start Revision <ChevronRight size={16} />
-                        </div>
-                    </button>
+                        actionText="Start Revision"
+                    />
 
                     {/* AI Recommended Card */}
-                    <button
+                    <TestCard
+                        title="AI Recommended"
+                        description="Personalized test recommendations based on your weak topics and performance history."
+                        icon={Sparkles}
+                        color="purple"
                         onClick={() => navigate('/ai-recommendations')}
-                        className="bg-white p-6 rounded-2xl shadow-sm hover:shadow-xl border border-gray-200 hover:border-purple-500 text-left transition-all group cursor-pointer h-full flex flex-col"
-                    >
-                        <div className="h-12 w-12 bg-purple-100 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                            <Sparkles size={24} className="text-purple-600" />
-                        </div>
-                        <h2 className="text-xl font-bold text-gray-900 mb-2">AI Recommended</h2>
-                        <p className="text-sm text-gray-500 leading-relaxed mb-4 flex-1">
-                            Personalized test recommendations based on your weak topics and performance history.
-                        </p>
-                        <div className="flex items-center gap-2 text-purple-600 text-sm font-semibold group-hover:translate-x-1 transition-transform">
-                            View Recommendations <ChevronRight size={16} />
-                        </div>
-                    </button>
+                        actionText="View Recommendations"
+                    />
                 </div>
 
                 {/* Topic Selection Modal */}
@@ -819,7 +898,7 @@ const Tests = () => {
                     examType={selectedExam}
                     onStartTest={handleCustomTestStart}
                 />
-            </div>
+            </div >
         );
     }
 

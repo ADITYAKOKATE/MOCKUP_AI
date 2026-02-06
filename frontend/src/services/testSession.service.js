@@ -216,5 +216,23 @@ export const testSessionService = {
         }
 
         return response.json();
+    },
+
+    /**
+     * Get exam pattern without starting session
+     */
+    getExamPattern: async (examType) => {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`${BASE_URL}/test/pattern?examType=${encodeURIComponent(examType)}`, {
+            headers: {
+                'x-auth-token': token
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to fetch exam pattern');
+        }
+
+        return response.json();
     }
 };
