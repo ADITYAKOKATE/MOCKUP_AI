@@ -39,3 +39,8 @@ coverage/
 data/
 db/
 backend/llmModel/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
