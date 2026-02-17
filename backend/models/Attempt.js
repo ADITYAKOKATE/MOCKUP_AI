@@ -122,7 +122,20 @@ const attemptSchema = new mongoose.Schema({
         default: Date.now,
         index: true
     },
-    submittedAt: Date
+    submittedAt: Date,
+
+    // Proctoring & Status
+    status: {
+        type: String,
+        enum: ['completed', 'terminated'],
+        default: 'completed'
+    },
+    proctoringLogs: [{
+        timestamp: Date,
+        type: { type: String }, // Fix: Wrap type in object to prevent Mongoose from treating array as [String]
+        message: String,
+        evidence: String
+    }]
 }, { timestamps: true });
 
 // Index for efficient queries

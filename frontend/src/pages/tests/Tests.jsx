@@ -14,7 +14,10 @@ import { ChevronRight, LayoutGrid, Clock, BookOpen, Shuffle, Sparkles, Target, Z
 import TestResults from './TestResults.jsx';
 import SubjectSelectionModal from './SubjectSelectionModal.jsx';
 
-const TestCard = ({ title, description, icon: Icon, color, onClick, actionText, loading }) => {
+const TestCard = ({ title, description, icon: Icon, color, onClick, actionText, loading, status }) => {
+    const isTerminated = status === 'terminated';
+
+    // Override colors if terminated
     const colorClasses = {
         blue: { bg: 'bg-blue-100', text: 'text-blue-600', border: 'hover:border-blue-500' },
         indigo: { bg: 'bg-indigo-100', text: 'text-indigo-600', border: 'hover:border-indigo-500' },
@@ -22,15 +25,16 @@ const TestCard = ({ title, description, icon: Icon, color, onClick, actionText, 
         violet: { bg: 'bg-violet-100', text: 'text-violet-600', border: 'hover:border-violet-500' },
         orange: { bg: 'bg-orange-100', text: 'text-orange-600', border: 'hover:border-orange-500' },
         purple: { bg: 'bg-purple-100', text: 'text-purple-600', border: 'hover:border-purple-500' },
+        red: { bg: 'bg-red-100', text: 'text-red-600', border: 'border-red-500 bg-red-50' }, // Terminated style
     };
 
-    const currentString = colorClasses[color] || colorClasses.blue;
+    const currentString = isTerminated ? colorClasses.red : (colorClasses[color] || colorClasses.blue);
 
     return (
         <button
             onClick={onClick}
             disabled={loading}
-            className={`group relative overflow-hidden bg-white p-6 rounded-2xl shadow-sm hover:shadow-xl border border-gray-200 ${currentString.border} text-left transition-all duration-300 cursor-pointer h-full flex flex-col disabled:opacity-50`}
+            className={`group relative overflow-hidden bg-white p-6 rounded-2xl shadow-sm hover:shadow-xl border border-gray-200 ${currentString.border} text-left transition-all duration-300 cursor-pointer h-full flex flex-col disabled:opacity-50 ${isTerminated ? 'ring-2 ring-red-500 ring-offset-2' : ''}`}
         >
             {/* Background Watermark Icon */}
             <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
@@ -38,16 +42,16 @@ const TestCard = ({ title, description, icon: Icon, color, onClick, actionText, 
             </div>
 
             <div className={`h-12 w-12 ${currentString.bg} rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300 z-10 relative`}>
-                <Icon size={24} className={currentString.text} />
+                {isTerminated ? <AlertTriangle size={24} className="text-red-600" /> : <Icon size={24} className={currentString.text} />}
             </div>
 
             <h2 className={`text-xl font-bold text-gray-900 mb-2 group-hover:${currentString.text} transition-colors z-10 relative`}>{title}</h2>
             <p className="text-sm text-gray-500 leading-relaxed mb-4 flex-1 z-10 relative">
-                {description}
+                {isTerminated ? "This test was terminated due to proctoring violations." : description}
             </p>
 
             <div className={`flex items-center gap-2 ${currentString.text} text-sm font-semibold group-hover:translate-x-1 transition-transform z-10 relative`}>
-                {actionText} <ChevronRight size={16} />
+                {isTerminated ? "View Violations" : actionText} <ChevronRight size={16} />
             </div>
         </button>
     );
@@ -65,6 +69,59 @@ const Tests = () => {
     const [testResults, setTestResults] = useState(null);
     const [showResumeModal, setShowResumeModal] = useState(false);
     const [activeSessionId, setActiveSessionId] = useState(null);
+    const [activeSessionStatus, setActiveSessionStatus] = useState(null);
+
+    // activeSessionStatus effect
+    useEffect(() => {
+        const checkActiveSession = async () => {
+            try {
+                // Fetch user attempts to check for last active/terminated session
+                const history = await api.getTestHistory();
+                // We assume getUserAttempts returns sorted list. 
+                // If not, we might need a dedicated endpoint or Client sort. 
+                // Assuming default is simple list.
+
+                if (history && history.length > 0) {
+                    const last = history[0];
+                    if (last.status === 'active') { // Only check for active
+                        setActiveSessionId(last._id);
+                        setActiveSessionStatus(last.status);
+                    }
+                }
+            } catch (e) {
+                console.error("Failed to check active session", e);
+            }
+        };
+        checkActiveSession();
+    }, []);
+
+
+    // ... (rest of states)
+
+    // Check for active session on mount
+    useEffect(() => {
+        checkActiveSession();
+    }, []);
+
+    const checkActiveSession = async () => {
+        try {
+            // We need an API to get current active session status without starting one
+            // Ideally `api.getUserAttempts` or a specific `api.getActiveSession`
+            // For now, let's try to infer or added a lightweight check if possible.
+            // Or we rely on the error from startAttempt.
+
+            // Actually, let's fetch the most recent session to see if it was terminated/active
+            const history = await api.getUserAttempts();
+            const lastSession = history[0]; // Assuming sorted by date desc
+
+            if (lastSession && lastSession.status === 'active') { // Only check for active
+                setActiveSessionId(lastSession._id);
+                setActiveSessionStatus(lastSession.status);
+            }
+        } catch (e) {
+            console.error("Failed to check active session", e);
+        }
+    };
     const [isSubjectModalOpen, setIsSubjectModalOpen] = useState(false);
     const [isTopicModalOpen, setIsTopicModalOpen] = useState(false);
     const [isCustomModalOpen, setIsCustomModalOpen] = useState(false);
@@ -107,11 +164,16 @@ const Tests = () => {
             setResponses(data.responses || {});
             setTimeLeft(data.timeRemaining);
 
-            // Set Pattern to generic/topic mode if not full
-            setTestMode('full'); // Reuse Full UI
-            setIsActive(true);
-
-            toast.success("Topic Test Started!");
+            if (data.status === 'terminated' || data.status === 'submitted') {
+                // Show results immediately
+                const result = await api.submitTest(sid); // Get results
+                setTestResults(result); // Show results screen
+            } else {
+                // Resume active
+                setTestMode('full');
+                setIsActive(true);
+                toast.success("Resuming Test Session...");
+            }
         } catch (error) {
             console.error("Failed to hydrate session:", error);
             toast.error("Failed to load test session");
@@ -705,7 +767,12 @@ const Tests = () => {
         });
     };
 
-    const handleSubmit = async () => {
+    const handleSubmit = async (payload = {}) => {
+        // Sanitize payload: If it's a browser event, ignore it
+        if (payload && (payload.nativeEvent || payload.preventDefault || payload.stopPropagation || payload.target)) {
+            payload = {};
+        }
+
         // Save time for final question
         const currentQId = questions[currentQuestionIndex]?.id;
         saveTimeForQuestion(currentQId);
@@ -715,7 +782,7 @@ const Tests = () => {
 
         if (sessionId && (testMode === 'full' || testMode === 'subject' || testMode === 'topic' || testMode === 'random')) {
             try {
-                const result = await api.submitTest(sessionId);
+                const result = await api.submitTest(sessionId, payload);
                 setTestResults(result);
                 toast.success(`Test Submitted Successfully!`);
             } catch (error) {
@@ -816,9 +883,18 @@ const Tests = () => {
                         description="Simulate a real exam environment with proper pattern, timer, and detailed analytics."
                         icon={LayoutGrid}
                         color="blue"
-                        onClick={handleFullTestClick}
-                        actionText={loading ? 'Loading...' : 'Start Full Test'}
+                        onClick={() => {
+                            if (activeSessionId && activeSessionStatus === 'active') {
+                                setShowResumeModal(true);
+                            } else if (activeSessionId && activeSessionStatus === 'terminated') {
+                                hydrateSession(activeSessionId);
+                            } else {
+                                handleFullTestClick();
+                            }
+                        }}
+                        actionText={activeSessionStatus === 'active' ? 'Resume Test' : 'Start Full Test'}
                         loading={loading}
+                        status={activeSessionStatus}
                     />
 
                     {/* Subject Wise Card */}
@@ -937,7 +1013,8 @@ const Tests = () => {
         testMode,
         title: testMode === 'subject' ? `Subject Test: ${selectedSubject} ` :
             testMode === 'topic-wise' ? `Topic: ${selectedTopic} ` :
-                testMode === 'revision' ? 'Revision Test' : 'Quick Quiz'
+                testMode === 'revision' ? 'Revision Test' : 'Quick Quiz',
+        enableProctoring: testMode === 'full' // Only enable for full tests
     };
 
     // Render based on mode

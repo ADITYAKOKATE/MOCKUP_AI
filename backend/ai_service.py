@@ -1,26 +1,52 @@
 import os
 import time
+import sys
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from gpt4all import GPT4All
 from typing import Optional, List, Dict, Any
+import base64
+import cv2
+import numpy as np
+from ultralytics import YOLO
+
+# Ensure debug folder exists
+os.makedirs("debug_images", exist_ok=True)
 
 app = FastAPI()
 
+# Add CORS
+from fastapi.middleware.cors import CORSMiddleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], 
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Configuration
 MODEL_NAME = "Phi-3-mini-4k-instruct.Q4_0.gguf"
-# Adjust path to match where setup_llm.py downloads it (backend/llmModel)
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "llmModel")
 
-print(f"🚀 Initializing AI Service...")
-print(f"📂 Model Path: {MODEL_PATH}")
+print(f"🚀 Initializing AI Service...", flush=True)
+
+# Load YOLO Model for Object Detection
+try:
+    print("🚀 Loading YOLOv8n model for object detection...", flush=True)
+    yolo_model = YOLO("yolov8n.pt") 
+    print("✅ YOLOv8n loaded successfully.", flush=True)
+except Exception as e:
+    print(f"❌ Failed to load YOLO model: {e}", flush=True)
+    yolo_model = None
 
 # Load Model (Global instance to avoid reloading)
 try:
+    print(f"🚀 Loading AI Model {MODEL_NAME}...", flush=True)
     model = GPT4All(MODEL_NAME, model_path=MODEL_PATH, allow_download=False, n_ctx=4096)
-    print("✅ Model loaded successfully!")
+    print("✅ AI Model loaded successfully.", flush=True)
 except Exception as e:
-    print(f"❌ Failed to load model: {e}")
+    print(f"❌ Failed to load model: {e}", flush=True)
     model = None
 
 class ExplanationRequest(BaseModel):
@@ -34,91 +60,17 @@ class ExplanationRequest(BaseModel):
 async def explain_question(request: ExplanationRequest):
     if not model:
         raise HTTPException(status_code=503, detail="AI Model not initialized")
-
+    
+    prompt = f"Question: {request.question}\nCorrect Answer: {request.correct_answer}\nUser Answer: {request.user_answer}\nExplain why the correct answer is correct and why the user's answer (if different) is wrong. Keep it concise."
+    
     try:
         start_time = time.time()
-        
-        is_unattempted = request.user_answer in [None, "", "Skipped", "Unattempted"]
-        user_answer_display = "Not Attempted / Skipped" if is_unattempted else request.user_answer
-
-        if is_unattempted:
-             prompt = f"""You are an expert personal tutor. A student skipped this question.
-
-Context:
-- Question: "{request.question}"
-- Student's Status: Not Attempted
-- Correct Answer: "{request.correct_answer}"
-- Official Solution: "{request.static_explanation if request.static_explanation else 'Not provided'}"
-
-Task:
-Since they didn't attempt it:
-1. Explain the concept simply so they can try it next time.
-2. Do NOT say "You got it wrong". Say "Here is how to solve this...".
-3. Keep it encouraging.
-4. Do NOT use headers like "Analysis:" or separators like "===".
-
-tutor:"""
-        else:
-            # Detect if they rushed (Wrong AND < 10 seconds)
-            is_rushed = (request.user_answer != request.correct_answer) and (request.time_taken < 10)
-            
-            timing_instruction = ""
-            if is_rushed:
-                timing_instruction = f"2. CRITICAL: They answered in only {request.time_taken}s and got it wrong. TELL THEM they rushed. Advise them to take their time and read carefully."
-            else:
-                timing_instruction = "2. Comment on their speed (Good pace? Too slow?)."
-
-            prompt = f"""You are an expert personal tutor. A student has just answered a question.
-
-Context:
-- Question: "{request.question}"
-- Student's Answer: "{user_answer_display}"
-- Correct Answer: "{request.correct_answer}"
-- Time Taken: {request.time_taken} seconds
-- Official Solution: "{request.static_explanation if request.static_explanation else 'Not provided'}"
-
-Task:
-Provide a 2-3 sentence friendly and personalized feedback.
-1. Explain WHY they were wrong (or confirm why they were right).
-{timing_instruction}
-3. Simplify the core concept.
-4. Use "You" to address the student directly.
-5. Do NOT use headers like "Analysis:" or separators like "===". Just start speaking.
-
-tutor:"""
-        
-        # Generate response
-        output = model.generate(prompt, max_tokens=200, temp=0.6)
-        
-        # Power-clean artifacts
-        cleaned_output = output.strip()
-        
-        # 1. Stop processing immediately at known end tokens/hallucinations
-        stop_markers = ["<|endoftext|>", "[Question]:", "Student:", "Context:", "Task:"]
-        for marker in stop_markers:
-            if marker in cleaned_output:
-                cleaned_output = cleaned_output.split(marker)[0]
-        
-        # 2. Remove common prefix artifacts
-        artifacts = ["===", "Analysis:", "analysis:", "# student", "<|diff_marker|>"]
-        for artifact in artifacts:
-            cleaned_output = cleaned_output.replace(artifact, "")
-            
-        # 3. Final regex cleanup
-        import re
-        cleaned_output = re.sub(r'^[^a-zA-Z0-9"(]+', '', cleaned_output).strip()
-
+        output = model.generate(prompt, max_tokens=200)
         processing_time = time.time() - start_time
-        print(f"⏱️ Generated explanation in {processing_time:.2f}s")
-        
-        return {
-            "explanation": cleaned_output,
-            "processing_time": processing_time
-        }
-
+        return {"explanation": output.strip(), "processing_time": processing_time}
     except Exception as e:
-        print(f"❌ Generation error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"❌ Explanation Generation Error: {e}", flush=True)
+        return {"explanation": "Failed to generate explanation", "processing_time": 0}
 
 class QuestionExample(BaseModel):
     question: str
@@ -140,100 +92,320 @@ async def generate_questions(request: GenerationRequest):
     if not model:
         raise HTTPException(status_code=503, detail="AI Model not initialized")
     
+    print(f"🤖 Generating {request.count} questions for topic: '{request.topic}' ({request.exam_type} - {request.subject})", flush=True)
+    
+    # Construct few-shot prompt
+    prompt = f"Generate {request.count} {request.difficulty} level {request.subject} questions on topic '{request.topic}' for {request.exam_type} exam.\n"
+    prompt += "Return ONLY a raw JSON array of objects with keys: question, options (list of 4), correct_answer, explanation, type.\n\n"
+    
+    if request.examples:
+        prompt += "Examples:\n"
+        for ex in request.examples[:2]:
+            prompt += f"Q: {ex.question}\nO: {ex.options}\nA: {ex.correct_answer}\n\n"
+            
+    prompt += "New Questions JSON:\n["
+    
     try:
-        start_time = time.time()
-        print(f"🧠 Generating {request.count} questions for {request.topic} ({request.subject})...")
-        
-        # Format examples
-        examples_text = ""
-        for i, ex in enumerate(request.examples, 1):
-            examples_text += f"\nExample {i}:\nQuestion: {ex.question}\nOptions: {ex.options}\nCorrect Answer: {ex.correct_answer}\nExplanation: {ex.explanation}\n"
-
-        # Simplified Prompt - Text Based (More robust for local models than JSON)
-        prompt = f"""<|user|>
-You are an expert exam question setter for {request.exam_type}. 
-Task: Create {request.count} NEW practice question(s) on "{request.topic}" ({request.subject}).
-Difficulty: {request.difficulty}.
-
-Use this EXACT format for each question (do not use markdown or JSON):
-
----
-Q: [Question text here]
-A) [Option 1]
-B) [Option 2]
-C) [Option 3]
-D) [Option 4]
-Correct: [Option text of the correct answer]
-Explanation: [Short explanation]
----
-
-Rules:
-1. Create {request.count} unique questions.
-2. Do not copy the examples.
-3. Ensure 4 options.
-<|end|>
-<|assistant|>"""
-
-        # Generate with lower temp for stability
-        output = model.generate(prompt, max_tokens=2048, temp=0.1)
-        
+        print(f"⏳ Sending prompt to AI model... (this may take ~{request.count * 25}s on CPU)", flush=True)
+        output = model.generate(prompt, max_tokens=1024, temp=0.7)
+        # Attempt to clean and parse JSON
         cleaned_output = output.strip()
-        print(f"🔍 Raw LLM Output:\n{cleaned_output}\n-------------------")
+        
+        # Remove markdown code blocks if present
+        if "```json" in cleaned_output:
+            cleaned_output = cleaned_output.split("```json")[1].split("```")[0].strip()
+        elif "```" in cleaned_output:
+             cleaned_output = cleaned_output.split("```")[1].split("```")[0].strip()
 
-        # Parse the structured text
+        if not cleaned_output.startswith("["):
+            # Try to find the first '['
+            start = cleaned_output.find("[")
+            if start != -1:
+                cleaned_output = cleaned_output[start:]
+            else:
+                # If no bracket, maybe it's just a raw list of objects? Try adding brackets
+                cleaned_output = "[" + cleaned_output
+
+        if not cleaned_output.endswith("]"):
+            # Try to find the last ']'
+            end = cleaned_output.rfind("]")
+            if end != -1:
+                cleaned_output = cleaned_output[:end+1]
+            else:
+                 # If cut off, try to append ']'
+                 cleaned_output += "]"
+            
+        import json
         import re
         
-        questions = []
-        # Split by separator
-        raw_blocks =cleaned_output.split('---')
+        # Step 1: Clean the output
+        # Since we end the prompt with '[', the model will continue from there
+        # So we need to prepend '[' to the output
+        full_json = "[" + cleaned_output
         
-        for block in raw_blocks:
-            if not block.strip(): continue
+        # Step 2: Try to find valid JSON array boundaries
+        # Remove everything after the last valid ']'
+        bracket_count = 0
+        last_valid_pos = -1
+        for i, char in enumerate(full_json):
+            if char == '[':
+                bracket_count += 1
+            elif char == ']':
+                bracket_count -= 1
+                if bracket_count == 0:
+                    last_valid_pos = i
+                    break
+        
+        if last_valid_pos != -1:
+            full_json = full_json[:last_valid_pos + 1]
+        
+        try:
+            questions = json.loads(full_json)
+        except json.JSONDecodeError as json_err:
+            print(f"⚠️ JSON Parse Error: {json_err}. Raw output: \n{output}", flush=True)
+            # Fallback: Regex extraction for objects
+            # Look for objects enclosed in braces
+            matches = re.findall(r'\{[^{}]*\}', cleaned_output, re.DOTALL)
+            questions = []
+            for m in matches:
+                try:
+                    obj = json.loads(m)
+                    # Validate that it has required fields and they're not empty
+                    if obj.get('question') and obj.get('options') and obj.get('correct_answer'):
+                        questions.append(obj)
+                except:
+                    pass
+
+            if not questions:
+                raise ValueError("Could not extract any valid JSON objects")
+        
+        print(f"✅ Successfully generated {len(questions)} questions for topic '{request.topic}'", flush=True)
+        return {"questions": questions}
+    except Exception as e:
+        print(f"❌ Question Generation Error for topic '{request.topic}': {e}", flush=True)
+        return {"questions": [], "error": str(e)}
+
+# Session Store for Baselines (In-Memory)
+session_baselines: Dict[str, Dict[str, int]] = {}
+
+class CalibrationRequest(BaseModel):
+    sessionId: str
+    images: List[str] # List of Base64 images
+
+@app.post("/calibrate")
+async def calibrate_session(request: CalibrationRequest):
+    try:
+        print(f"📸 Calibrating session {request.sessionId} with {len(request.images)} frames...", flush=True)
+        
+        valid_faces = []
+        
+        for i, b64 in enumerate(request.images):
+            try:
+                print(f"🔹 Processing frame {i+1}/{len(request.images)} (Length: {len(b64)})", flush=True)
+                
+                # Decode
+                if ',' in b64:
+                     b64 = b64.split(',')[1]
+                
+                try:
+                    image_data = base64.b64decode(b64)
+                    np_arr = np.frombuffer(image_data, np.uint8)
+                except Exception as e:
+                    print(f"❌ Base64 Decode Error frame {i}: {e}", flush=True)
+                    continue
+                
+                if np_arr.size == 0:
+                    print(f"⚠️ Empty buffer frame {i}", flush=True)
+                    continue
+                
+                try:
+                    img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+                except Exception as e:
+                    print(f"❌ Imdecode Error frame {i}: {e}", flush=True)
+                    continue
+                
+                if img is None: 
+                    print(f"⚠️ img is None frame {i}", flush=True)
+                    continue
+
+                h, w = img.shape[:2]
+                print(f"📏 Frame {i} Size: {w}x{h}", flush=True)
+
+                # Save frame for debugging
+                timestamp = int(time.time() * 1000)
+                debug_path = f"debug_images/calib_{request.sessionId}_{timestamp}_{i}.jpg"
+                cv2.imwrite(debug_path, img)
+                print(f"✅ Saved debug image: {debug_path}", flush=True)
+                
+                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                # Enhance contrast
+                gray = cv2.equalizeHist(gray)
+                
+                # Load Cascade
+                
+                # Load Cascade
+                cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+                face_cascade = cv2.CascadeClassifier(cascade_path)
+                
+                if face_cascade.empty():
+                    print(f"❌ Failed to load Haar Cascade from: {cascade_path}", flush=True)
+                
+                # Relaxed parameters for better detection
+                # scaleFactor=1.05 (slower but more thorough), minNeighbors=3 (more sensitive)
+                faces = face_cascade.detectMultiScale(gray, scaleFactor=1.05, minNeighbors=3, minSize=(30, 30))
+
+                print(f"🖼️ Frame {i+1}: Found {len(faces)} faces.", flush=True)
+
+                if len(faces) >= 1:
+                    # Take the largest face if multiple
+                    largest_face = max(faces, key=lambda f: f[2] * f[3])
+                    valid_faces.append(largest_face) 
+                else:
+                    print(f"⚠️ No faces in frame {i+1}", flush=True)
+
+            except Exception as e:
+                print(f"⚠️ Error processing frame {i}: {e}", flush=True)
+                continue
+        
+        print(f"📊 Valid faces collected: {len(valid_faces)} / {len(request.images)}", flush=True)
+
+        if not valid_faces:
+             return {"status": "error", "message": "No valid faces detected. Check lighting/camera."}
+
+        # Calculate Average Baseline
+        avg_x = int(sum([f[0] for f in valid_faces]) / len(valid_faces))
+        avg_y = int(sum([f[1] for f in valid_faces]) / len(valid_faces))
+        avg_w = int(sum([f[2] for f in valid_faces]) / len(valid_faces))
+        avg_h = int(sum([f[3] for f in valid_faces]) / len(valid_faces))
+
+        baseline = {"x": avg_x, "y": avg_y, "w": avg_w, "h": avg_h}
+        session_baselines[request.sessionId] = baseline
+        
+        print(f"✅ Calibration Success for {request.sessionId}: {baseline}", flush=True)
+        return {"status": "success", "baseline": baseline}
+
+    except Exception as e:
+        print(f"❌ Calibration error: {e}", flush=True)
+        return {"status": "error", "message": str(e)}
+
+class AnalysisRequest(BaseModel):
+    sessionId: str
+    image: str # Base64 encoded image
+
+@app.post("/analyze-frame")
+async def analyze_frame(request: AnalysisRequest):
+    try:
+        # Decode image
+        if ',' in request.image:
+             b64 = request.image.split(',')[1]
+        else:
+             b64 = request.image
+
+        image_data = base64.b64decode(b64)
+        np_arr = np.frombuffer(image_data, np.uint8)
+        
+        if np_arr.size == 0:
+             return {"status": "error", "message": "Empty image buffer"}
+
+        try:
+            img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        except Exception:
+            return {"status": "error", "message": "Image decode error"}
+
+        if img is None:
+            return {"status": "error", "message": "Invalid image"}
+
+        # 1. Check for Electronic Devices (Phones) using YOLO (PRIORITY)
+        # Run this FIRST so it detects phone even if face is blocked
+        if yolo_model:
+            results = yolo_model(img, verbose=False) # Run inference
             
-            # Extract fields using Regex
-            q_match = re.search(r'Q:\s*(.*?)(?=\n[A-D]\))', block, re.DOTALL)
-            a_match = re.search(r'A\)\s*(.*?)(?=\nB\))', block, re.DOTALL)
-            b_match = re.search(r'B\)\s*(.*?)(?=\nC\))', block, re.DOTALL)
-            c_match = re.search(r'C\)\s*(.*?)(?=\nD\))', block, re.DOTALL)
-            d_match = re.search(r'D\)\s*(.*?)(?=\nCorrect:)', block, re.DOTALL)
-            corr_match = re.search(r'Correct:\s*(.*?)(?=\nExplanation:|$)', block, re.DOTALL)
-            exp_match = re.search(r'Explanation:\s*(.*)', block, re.DOTALL)
+            # Check for class 67 ('cell phone')
+            for result in results:
+                boxes = result.boxes
+                for box in boxes:
+                    cls_id = int(box.cls[0])
+                    conf = float(box.conf[0])
+                    
+                    if cls_id == 67 and conf > 0.4: # Lowered threshold slightly to 0.4
+                         return {
+                             "status": "violation", 
+                             "type": "E_DEVICE_DETECTED", 
+                             "message": "Electronic Device Detected (Phone)",
+                             "evidence_score": conf
+                         }
 
-            if q_match and a_match and b_match and c_match and d_match and corr_match:
-                q_obj = {
-                    "question": q_match.group(1).strip(),
-                    "options": [
-                        a_match.group(1).strip(),
-                        b_match.group(1).strip(),
-                        c_match.group(1).strip(),
-                        d_match.group(1).strip()
-                    ],
-                    "correct_answer": corr_match.group(1).strip(),
-                    "explanation": exp_match.group(1).strip() if exp_match else "Explanation provided by AI.",
-                    "type": "MCQ"
-                }
-                questions.append(q_obj)
-
-        if not questions:
-            # Fallback: Try simpler split if regex fails (sometimes models miss newlines)
-            pass 
-
-        processing_time = time.time() - start_time
-        print(f"⏱️ Parsed {len(questions)} questions in {processing_time:.2f}s")
+        # OpenCV Haar Cascade
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(30, 30))
         
+        face_count = len(faces)
+
+        if face_count == 0:
+            return {"status": "violation", "type": "NO_FACE", "message": "No face detected"}
+
+        if face_count > 1:
+            return {"status": "violation", "type": "MULTIPLE_FACES", "message": "Multiple faces detected"}
+
+        # Single Face Found - Check against Baseline
+        (x, y, w, h) = faces[0]
+        
+        baseline = session_baselines.get(request.sessionId)
+        
+        violation_type = None
+        violation_msg = None
+
+        if baseline:
+            # 1. Check Position Shift (Movement)
+            cx, cy = x + w/2, y + h/2
+            bx, by = baseline['x'] + baseline['w']/2, baseline['y'] + baseline['h']/2
+            
+            dist = np.sqrt((cx - bx)**2 + (cy - by)**2)
+            
+            # Thresholds (pixels) - Tunable
+            MOVEMENT_THRESHOLD = 50 
+            
+            if dist > MOVEMENT_THRESHOLD:
+                violation_type = "HIGH_MOVEMENT"
+                violation_msg = "Excessive movement detected"
+            
+            # 2. Check Size Change (Leaning)
+            current_area = w * h
+            baseline_area = baseline['w'] * baseline['h']
+            ratio = current_area / baseline_area
+            
+            if ratio < 0.6: # Much smaller
+                violation_type = "LEANING_BACK"
+                violation_msg = "User leaning too far back"
+            elif ratio > 1.6: # Much bigger
+                violation_type = "LEANING_FORWARD"
+                violation_msg = "User too close to camera"
+
+        if violation_type:
+             return {
+                 "status": "violation", 
+                 "type": violation_type, 
+                 "message": violation_msg,
+                 "face_data": {"x": int(x), "y": int(y), "w": int(w), "h": int(h)}
+             }
+
         return {
-            "questions": questions,
-            "processing_time": processing_time
+            "status": "clean", 
+            "type": "FACE_DETECTED", 
+            "message": "Valid",
+            "face_data": {"x": int(x), "y": int(y), "w": int(w), "h": int(h)}
         }
 
     except Exception as e:
-        print(f"❌ Generation error: {e}")
-        return {"questions": [], "error": str(e)}
+        print(f"❌ Analysis error: {e}", flush=True)
+        return {"status": "error", "message": str(e)}
 
 @app.get("/health")
 def health_check():
-    return {"status": "active", "model_loaded": model is not None}
+    return {"status": "active", "model_loaded": model is not None, "vision_loaded": True}
 
 if __name__ == "__main__":
     import uvicorn
+    # Enforce one process
     uvicorn.run(app, host="0.0.0.0", port=5001)

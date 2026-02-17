@@ -1,6 +1,7 @@
 const Attempt = require('../models/Attempt');
 const Question = require('../models/Question');
 const Performance = require('../models/Performance');
+const QuestionGenerator = require('../services/QuestionGenerator');
 
 exports.submitAttempt = async (req, res) => {
     try {
@@ -74,6 +75,12 @@ exports.submitAttempt = async (req, res) => {
         // We use testType as the examName (e.g., "JEE Main", "GATE CSE")
         try {
             await Performance.updatePerformance(userId, testType, processedQuestions, questionMap);
+
+            // Trigger AI Generation for Weak Topics (Async - fail safe)
+            // Fire and forget to not block response
+            QuestionGenerator.generateRemedialQuestions(userId, testType)
+                .catch(err => console.error('Background Question Gen Failed:', err));
+
         } catch (perfError) {
             console.error('❌ Failed to update performance:', perfError);
             // Don't fail the attempt submission if performance update fails

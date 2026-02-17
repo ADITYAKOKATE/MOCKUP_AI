@@ -114,7 +114,8 @@ exports.startFullTest = async (req, res) => {
             })),
             duration: pattern.duration,
             timeRemaining: pattern.duration * 60,
-            status: 'active'
+            status: 'active',
+            metadata: { warnings: [] }
         });
 
         await testSession.save();
@@ -263,6 +264,98 @@ exports.saveResponse = async (req, res) => {
 
     } catch (error) {
         console.error('Error saving response:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
+const fs = require('fs');
+const path = require('path');
+
+// ... (existing imports)
+
+/**
+ * Log Proctoring Violation
+ * POST /api/test/session/:sessionId/log-violation
+ */
+exports.logViolation = async (req, res) => {
+    try {
+        const { sessionId } = req.params;
+        const userId = req.user.id;
+        const { type, message, evidence } = req.body; // evidence is base64 string
+
+        const session = await TestSession.findOne({ _id: sessionId, userId, status: 'active' });
+
+        if (!session) {
+            return res.status(404).json({ message: 'Active test session not found' });
+        }
+
+        let evidencePath = null;
+        console.log(`[LogViolation] Received log: ${type}. Evidence length: ${evidence ? evidence.length : 'null'}`);
+
+        // Save evidence if provided
+        if (evidence && evidence.startsWith('data:image')) {
+            try {
+                // remove header
+                const base64Data = evidence.replace(/^data:image\/\w+;base64,/, "");
+                const buffer = Buffer.from(base64Data, 'base64');
+
+                const filename = `violation_${sessionId}_${Date.now()}.jpg`;
+                const uploadDir = path.join(__dirname, '..', 'uploads', 'evidence');
+
+                // Ensure dir exists
+                if (!fs.existsSync(uploadDir)) {
+                    fs.mkdirSync(uploadDir, { recursive: true });
+                }
+
+                const filePath = path.join(uploadDir, filename);
+                fs.writeFileSync(filePath, buffer);
+
+                evidencePath = `/uploads/evidence/${filename}`;
+                console.log(`[LogViolation] Evidence saved: ${evidencePath}`);
+            } catch (err) {
+                console.error("[LogViolation] Failed to save evidence:", err);
+            }
+        }
+
+        // Add log
+        session.proctoringLogs.push({
+            type,
+            message,
+            evidence: evidencePath,
+            timestamp: new Date()
+        });
+
+        // Also add to warnings list for easy display? 
+        // Or just rely on logs. Let's add distinct warnings if it's a major one
+        if (['TAB_SWITCH', 'MULTIPLE_FACES', 'NO_FACE', 'HIGH_MOVEMENT'].includes(type) || type === 'TERMINATION_WARNING') {
+            if (!session.metadata) {
+                session.metadata = { warnings: [] };
+            }
+            if (!session.metadata.warnings) {
+                session.metadata.warnings = [];
+            }
+            session.metadata.warnings.push(`${type}: ${message}`);
+        }
+
+        // Check for termination condition
+        const WARNING_LIMIT = 5;
+        const currentWarnings = session.metadata?.warnings?.length || 0;
+
+        if (currentWarnings >= WARNING_LIMIT || type === 'TERMINATION_WARNING') {
+            session.status = 'terminated';
+            console.log(`[LogViolation] Session ${sessionId} marked as TERMINATED due to violations.`);
+        }
+
+        // Mark as modified to ensure mixed/nested updates are saved
+        session.markModified('metadata');
+        session.markModified('proctoringLogs');
+
+        await session.save();
+
+        res.json({ message: 'Violation logged', warningCount: session.metadata?.warnings?.length || 0 });
+
+    } catch (error) {
+        console.error('Error logging violation:', error);
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -992,7 +1085,14 @@ exports.submitTest = async (req, res) => {
             subjectWise: results.subjectWise,
             totalTimeTaken: results.totalTimeTaken,
             avgTimePerQuestion: results.avgTimePerQuestion,
-            submittedAt: new Date()
+            totalTimeTaken: results.totalTimeTaken,
+            avgTimePerQuestion: results.avgTimePerQuestion,
+            totalTimeTaken: results.totalTimeTaken,
+            avgTimePerQuestion: results.avgTimePerQuestion,
+            submittedAt: new Date(),
+            // Prioritize frontend termination flag if present
+            status: (req.body.status === 'terminated' || session.status === 'terminated') ? 'terminated' : 'completed',
+            proctoringLogs: session.proctoringLogs || []
         });
 
         await attempt.save();
@@ -1034,10 +1134,23 @@ exports.submitTest = async (req, res) => {
 
     } catch (error) {
         console.error('Error submitting test:', error);
+
+        // Log to file for debugging
+        try {
+            const fs = require('fs');
+            const path = require('path');
+            const logPath = path.join(__dirname, '..', 'backend_error.log');
+            const logData = `[${new Date().toISOString()}] Error: ${error.message}\nStack: ${error.stack}\nValidation: ${JSON.stringify(error.errors || {}, null, 2)}\n\n`;
+            fs.appendFileSync(logPath, logData);
+        } catch (fileErr) {
+            console.error('Failed to write error log:', fileErr);
+        }
+
         if (error.name === 'ValidationError') {
             console.error('Validation Errors:', JSON.stringify(error.errors, null, 2));
+            return res.status(400).json({ message: 'Validation Error', details: error.message, errors: error.errors });
         }
-        res.status(500).json({ message: 'Server error', details: error.message });
+        res.status(500).json({ message: 'Server error', details: error.message, stack: error.stack });
     }
 };
 
@@ -1486,7 +1599,7 @@ exports.getUserAttempts = async (req, res) => {
         }
 
         const attempts = await Attempt.find(filter)
-            .select('examType testType topic subject score totalMarks percentage accuracy createdAt subjectWise totalTimeTaken')
+            .select('examType testType topic subject score totalMarks percentage accuracy createdAt subjectWise totalTimeTaken status proctoringLogs')
             .sort({ createdAt: -1 });
 
         res.json(attempts);

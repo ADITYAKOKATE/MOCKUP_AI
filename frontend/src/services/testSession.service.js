@@ -144,14 +144,15 @@ export const testSessionService = {
     /**
      * Submit test
      */
-    submitTest: async (sessionId) => {
+    submitTest: async (sessionId, payload = {}) => {
         const token = localStorage.getItem('token');
         const response = await fetch(`${BASE_URL}/test/session/${sessionId}/submit`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'x-auth-token': token
-            }
+            },
+            body: JSON.stringify(payload)
         });
 
         if (!response.ok) {

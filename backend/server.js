@@ -21,6 +21,10 @@ app.use((err, req, res, next) => {
     next();
 });
 
+// Serve static files from uploads directory
+const path = require('path');
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
 // Database Connection
 mongoose.connect(process.env.MONGO_URI, { dbName: process.env.DB_NAME })
     .then(() => console.log(`✅ MongoDB Connected to ${process.env.DB_NAME}`))

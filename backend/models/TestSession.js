@@ -57,7 +57,7 @@ const testSessionSchema = new mongoose.Schema({
     timeRemaining: Number, // in seconds
     status: {
         type: String,
-        enum: ['active', 'submitted', 'expired'],
+        enum: ['active', 'submitted', 'expired', 'terminated'],
         default: 'active'
     },
     metadata: {
@@ -68,7 +68,19 @@ const testSessionSchema = new mongoose.Schema({
             default: 0
         },
         warnings: [String]
-    }
+    },
+    proctoringLogs: [{
+        timestamp: {
+            type: Date,
+            default: Date.now
+        },
+        type: {
+            type: String,
+            enum: ['TAB_SWITCH', 'FULLSCREEN_EXIT', 'NO_FACE', 'MULTIPLE_FACES', 'LOOKING_AWAY', 'E_DEVICE_DETECTED', 'LOWER_face_conf', 'HIGH_MOVEMENT', 'TERMINATION_WARNING']
+        },
+        message: String,
+        evidence: String // Optional: URL to captured image or confidence score
+    }]
 }, { timestamps: true });
 
 // Index for finding active sessions

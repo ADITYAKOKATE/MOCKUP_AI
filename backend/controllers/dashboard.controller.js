@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Attempt = require('../models/Attempt');
 const Performance = require('../models/Performance');
 const UserProfile = require('../models/UserProfile');
@@ -32,8 +33,6 @@ exports.getDashboardData = async (req, res) => {
             console.log(`[Dashboard Debug] Exam Query: ${exam}`);
             console.log(`[Dashboard Debug] Normalized: ${normalizedExam}`);
 
-            // Find matching exam in user's profile (case-insensitive)
-            // Handle both "examType" and "examType branch" formats
             // Find matching exam in user's profile (case-insensitive)
             // Handle "examType", "examType branchCode", AND "examType branchFullName" formats
             const matchingExam = userProfile.exams.find(e => {
@@ -88,14 +87,43 @@ exports.getDashboardData = async (req, res) => {
             attemptQueryRegex = `^GATE ${branchCode}`;
             console.log(`[Dashboard] Refined attempt query for GATE: ${attemptQueryRegex}`);
         } else {
-            // For others, prefix match is fine? (e.g. JEE Main)
-            // Maybe default to exact match if not GATE?
-            // But existing code used prefix. keeping it safe.
             attemptQueryRegex = `^${selectedExam}`;
         }
 
-        // Fetch attempts for this specific exam
-        // Use prefix match to handle variations (e.g. "GATE" matches "gate-cs")
+        // 1. Calculate Aggregated Stats (Across ALL Attempts)
+        const statsPipeline = [
+            {
+                $match: {
+                    userId: new mongoose.Types.ObjectId(userId),
+                    examType: { $regex: new RegExp(attemptQueryRegex, 'i') }
+                }
+            },
+            {
+                $group: {
+                    _id: null,
+                    totalTests: { $sum: 1 },
+                    totalQuestions: { $sum: "$totalQuestions" },
+                    totalAttempted: { $sum: { $ifNull: ["$totalAttempted", { $add: ["$totalCorrect", "$totalWrong"] }] } },
+                    totalCorrect: { $sum: "$totalCorrect" },
+                    totalWrong: { $sum: "$totalWrong" },
+                    totalTime: { $sum: "$totalTimeTaken" },
+                    totalScore: { $sum: "$score" }
+                }
+            }
+        ];
+
+        const statsResult = await Attempt.aggregate(statsPipeline);
+        const aggStats = statsResult.length > 0 ? statsResult[0] : {
+            totalTests: 0,
+            totalQuestions: 0,
+            totalAttempted: 0,
+            totalCorrect: 0,
+            totalWrong: 0,
+            totalTime: 0,
+            totalScore: 0
+        };
+
+        // 2. Fetch Recent Attempts for UI Lists (Limit 20)
         const attempts = await Attempt.find({
             userId,
             examType: { $regex: new RegExp(attemptQueryRegex, 'i') }
@@ -160,25 +188,43 @@ exports.getDashboardData = async (req, res) => {
             console.log(`[Dashboard] Rebuild complete.`);
         }
 
+        // 3. Merge with Performance Data (User Preference)
+        // If performance record exists, we prefer its pre-calculated stats for accuracy/time
+        if (performance && performance.exams && performance.exams.has(performanceExamName)) {
+            const perfStats = performance.exams.get(performanceExamName).globalStats;
+            if (perfStats) {
+                console.log(`[Dashboard] Using Performance Schema stats for ${performanceExamName}`);
+                aggStats.totalAttempted = perfStats.totalAttempted;
+                aggStats.totalCorrect = perfStats.totalCorrect;
+                aggStats.totalWrong = perfStats.totalWrong;
+                aggStats.totalTime = perfStats.totalTime;
+                // Performance schema calculates accuracy as percentage already
+                aggStats.averageAccuracy = perfStats.averageAccuracy;
+            }
+        }
+
         // Calculate dashboard metrics
         const dashboardData = {
             hasProfile: true,
             selectedExam: selectedBranch ? `${selectedExam} ${selectedBranch}` : selectedExam,
 
-            // Overall Stats
+            // Overall Stats (Hybrid: Aggregation + Performance Schema)
             stats: {
-                totalTests: attempts.length,
-                totalQuestions: attempts.reduce((sum, a) => sum + a.totalQuestions, 0),
-                totalCorrect: attempts.reduce((sum, a) => sum + a.totalCorrect, 0),
-                totalWrong: attempts.reduce((sum, a) => sum + a.totalWrong, 0),
-                totalTime: attempts.reduce((sum, a) => sum + a.totalTimeTaken, 0),
-                averageScore: attempts.length > 0
-                    ? (attempts.reduce((sum, a) => sum + a.score, 0) / attempts.length).toFixed(2)
+                totalTests: aggStats.totalTests,
+                totalQuestions: aggStats.totalQuestions,
+                totalAttempted: aggStats.totalAttempted || 0,
+                totalCorrect: aggStats.totalCorrect,
+                totalWrong: aggStats.totalWrong,
+                totalTime: aggStats.totalTime,
+                averageScore: aggStats.totalTests > 0
+                    ? (aggStats.totalScore / aggStats.totalTests).toFixed(2)
                     : 0,
-                averageAccuracy: attempts.length > 0
-                    ? ((attempts.reduce((sum, a) => sum + a.totalCorrect, 0) /
-                        attempts.reduce((sum, a) => sum + a.totalQuestions, 0)) * 100).toFixed(2)
-                    : 0
+                // Use Performance accuracy if available, else calculate from aggregation
+                averageAccuracy: aggStats.averageAccuracy !== undefined
+                    ? aggStats.averageAccuracy.toFixed(2)
+                    : ((aggStats.totalAttempted || 0) > 0
+                        ? ((aggStats.totalCorrect / (aggStats.totalAttempted || 1)) * 100).toFixed(2)
+                        : 0)
             },
 
             // Last Test Info

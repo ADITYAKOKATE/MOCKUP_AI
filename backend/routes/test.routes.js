@@ -33,6 +33,11 @@ router.get('/session/:sessionId', auth, testController.getTestSession);
 // @access  Private
 router.post('/session/:sessionId/response', auth, testController.saveResponse);
 
+// @route   POST api/test/session/:sessionId/log-violation
+// @desc    Log proctoring violation
+// @access  Private
+router.post('/session/:sessionId/log-violation', auth, testController.logViolation);
+
 // @route   POST api/test/session/:sessionId/submit
 // @desc    Submit test and get results
 // @access  Private

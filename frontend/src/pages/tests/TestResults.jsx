@@ -15,7 +15,8 @@ const TestResults = ({ results, onBack }) => {
         totalUnattempted,
         totalQuestions,
         subjectWise,
-        totalTimeTaken
+        totalTimeTaken,
+        proctoringLogs // Add this
     } = results;
 
     // Data for Pie Chart
@@ -139,6 +140,8 @@ const TestResults = ({ results, onBack }) => {
                         </div>
                     </div>
 
+
+
                     {/* Subject Wise Analysis */}
                     <div className="lg:col-span-2 bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
                         <h3 className="text-lg font-bold text-gray-900 mb-6 flex items-center gap-2">
@@ -194,9 +197,47 @@ const TestResults = ({ results, onBack }) => {
                             ))}
                         </div>
                     </div>
+
+                    {/* Proctoring Report */}
+                    {proctoringLogs && proctoringLogs.length > 0 && (
+                        <div className="lg:col-span-3 bg-white p-6 rounded-2xl shadow-sm border border-red-100">
+                            <h3 className="text-lg font-bold text-red-700 mb-6 flex items-center gap-2">
+                                <Target size={20} className="text-red-500" />
+                                Proctoring Violations Found ({proctoringLogs.length})
+                            </h3>
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {proctoringLogs.map((log, index) => (
+                                    <div key={index} className="border border-red-100 bg-red-50/50 p-4 rounded-xl flex flex-col gap-3">
+                                        <div className="flex justify-between items-start">
+                                            <div>
+                                                <div className="font-bold text-red-800 text-sm">{log.type}</div>
+                                                <div className="text-xs text-red-600">{new Date(log.timestamp).toLocaleTimeString()}</div>
+                                            </div>
+                                            <span className="bg-red-100 text-red-700 text-xs px-2 py-1 rounded-full font-bold">
+                                                #{index + 1}
+                                            </span>
+                                        </div>
+                                        <p className="text-sm text-gray-700">{log.message}</p>
+
+                                        {/* Evidence Image */}
+                                        {log.evidence && (
+                                            <div className="relative group overflow-hidden rounded-lg border border-gray-200 mt-2">
+                                                <img
+                                                    src={`http://localhost:5000${log.evidence}`}
+                                                    alt="Violation Evidence"
+                                                    className="w-full h-40 object-cover hover:scale-105 transition-transform duration-300"
+                                                />
+                                                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors pointer-events-none" />
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
-        </div>
+        </div >
     );
 };
 

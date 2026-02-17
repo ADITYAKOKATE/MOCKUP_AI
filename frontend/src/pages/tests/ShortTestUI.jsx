@@ -66,6 +66,7 @@ const ShortTestUI = ({
                         onMark={() => onMarkForReview(currentQuestion.id)}
                         isMarked={isMarked}
                         onQuit={() => setIsQuitModalOpen(true)}
+                        allAttempted={questions.every(q => responses[q.id]?.answer !== undefined && responses[q.id]?.answer !== null)}
                     />
                 </div>
             </div>

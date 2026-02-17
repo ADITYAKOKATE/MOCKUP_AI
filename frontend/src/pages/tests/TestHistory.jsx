@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
-import { Clock, Calendar, CheckCircle, ChevronRight, BarChart2, Hash, Zap, ArrowUpRight, FileText } from 'lucide-react';
+import { Clock, Calendar, CheckCircle, ChevronRight, BarChart2, Hash, Zap, ArrowUpRight, FileText, AlertTriangle } from 'lucide-react';
 
 const TestHistory = () => {
     const { selectedExam } = useAuth();
@@ -91,23 +91,33 @@ const TestHistory = () => {
                     ) : (
                         attempts.map((attempt) => {
                             const percent = Math.round((attempt.score / attempt.totalMarks) * 100) || 0;
-                            const statusColor = getScoreColor(percent);
+                            const isTerminated = attempt.status === 'terminated';
+
+                            // Adjust status color if terminated
+                            const statusColor = isTerminated ? 'text-red-600 bg-red-100' : getScoreColor(percent);
+                            const cardBorder = isTerminated ? 'border-red-200 ring-4 ring-offset-2 ring-red-50' : 'border-gray-100';
+                            const cardBg = isTerminated ? 'bg-red-50/30' : 'bg-white';
 
                             return (
                                 <div
                                     key={attempt._id}
-                                    className="group bg-white rounded-3xl p-6 border border-gray-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 relative overflow-hidden"
+                                    className={`group ${cardBg} rounded-3xl p-6 border ${cardBorder} shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 relative overflow-hidden`}
                                 >
                                     {/* Top Decoration */}
-                                    <div className={`absolute top-0 left-0 right-0 h-1.5 ${percent >= 50 ? 'bg-gradient-to-r from-blue-500 to-indigo-500' : 'bg-gradient-to-r from-orange-400 to-red-500'}`} />
+                                    <div className={`absolute top-0 left-0 right-0 h-1.5 ${isTerminated ? 'bg-red-600' : (percent >= 50 ? 'bg-gradient-to-r from-blue-500 to-indigo-500' : 'bg-gradient-to-r from-orange-400 to-red-500')}`} />
 
                                     {/* Card Header */}
                                     <div className="flex justify-between items-start mb-6">
-                                        <div>
+                                        <div className="flex flex-col items-start">
+                                            {isTerminated && (
+                                                <span className="inline-flex items-center px-2 py-1 rounded bg-red-600 text-white text-xs font-bold mb-2 tracking-wide uppercase">
+                                                    Terminated
+                                                </span>
+                                            )}
                                             {(() => {
                                                 const type = attempt.testType?.toLowerCase();
                                                 let badgeStyle = "bg-gray-100 text-gray-700 border-gray-200";
-                                                let label = attempt.examType;
+                                                let label = attempt.examType || "Unknown Exam";
 
                                                 if (type === 'subject') {
                                                     badgeStyle = "bg-purple-50 text-purple-700 border-purple-100";
@@ -117,6 +127,7 @@ const TestHistory = () => {
                                                     label = `Topic: ${attempt.topic}`;
                                                 } else if (type === 'full') {
                                                     badgeStyle = "bg-blue-50 text-blue-700 border-blue-100";
+                                                    // label stays examType
                                                 } else if (type === 'random') {
                                                     badgeStyle = "bg-violet-50 text-violet-700 border-violet-100";
                                                     label = attempt.subject === 'Mixed' ? "Custom Drill (Mixed)" : `Custom Drill: ${attempt.subject}`;
@@ -134,33 +145,35 @@ const TestHistory = () => {
                                             </div>
                                         </div>
                                         <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm ${statusColor}`}>
-                                            {percent}%
+                                            {isTerminated ? '!' : `${percent}%`}
                                         </div>
                                     </div>
 
                                     {/* Metrics Grid */}
                                     <div className="grid grid-cols-2 gap-4 mb-6">
-                                        <div className="p-3 bg-gray-50 rounded-2xl">
+                                        <div className="p-3 bg-white/60 rounded-2xl border border-gray-100">
                                             <div className="text-xs font-bold text-gray-400 uppercase mb-1">Score</div>
                                             <div className="text-xl font-black text-gray-900">
                                                 {attempt.score}
                                                 <span className="text-sm text-gray-400 font-medium bg-transparent">/{attempt.totalMarks}</span>
                                             </div>
                                         </div>
-                                        <div className="p-3 bg-gray-50 rounded-2xl">
+                                        <div className="p-3 bg-white/60 rounded-2xl border border-gray-100">
                                             <div className="text-xs font-bold text-gray-400 uppercase mb-1">Time</div>
                                             <div className="text-lg font-bold text-gray-700 flex items-center gap-1">
                                                 {formatTime(attempt.totalTimeTaken)}
                                             </div>
                                         </div>
-                                        <div className="p-3 bg-gray-50 rounded-2xl col-span-2 flex items-center justify-between">
+                                        <div className="p-3 bg-white/60 rounded-2xl col-span-2 flex items-center justify-between border border-gray-100">
                                             <div className="flex items-center gap-2">
-                                                <div className="p-1.5 bg-green-100 text-green-600 rounded-lg">
-                                                    <CheckCircle size={14} />
+                                                <div className={`p-1.5 rounded-lg ${isTerminated ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
+                                                    {isTerminated ? <AlertTriangle size={14} /> : <CheckCircle size={14} />}
                                                 </div>
-                                                <span className="text-sm font-bold text-gray-700">Accuracy</span>
+                                                <span className="text-sm font-bold text-gray-700">{isTerminated ? 'Violations' : 'Accuracy'}</span>
                                             </div>
-                                            <span className="text-lg font-black text-gray-900">{attempt.accuracy}%</span>
+                                            <span className={`text-lg font-black ${isTerminated ? 'text-red-700' : 'text-gray-900'}`}>
+                                                {isTerminated ? (attempt.proctoringLogs?.length || '5+') : `${attempt.accuracy}%`}
+                                            </span>
                                         </div>
                                     </div>
 
@@ -175,7 +188,7 @@ const TestHistory = () => {
                                         </button>
                                         <button
                                             onClick={() => navigate(`/tests/review/${attempt._id}`)}
-                                            className="px-4 py-2.5 rounded-xl bg-gray-900 text-white font-bold text-sm hover:bg-black transition-colors flex items-center justify-center gap-2 group-hover:shadow-lg group-hover:shadow-gray-200"
+                                            className={`px-4 py-2.5 rounded-xl font-bold text-sm transition-colors flex items-center justify-center gap-2 group-hover:shadow-lg ${isTerminated ? 'bg-red-600 hover:bg-red-700 text-white shadow-red-200' : 'bg-gray-900 hover:bg-black text-white shadow-gray-200'}`}
                                         >
                                             Review
                                             <ChevronRight size={16} className="group-hover:translate-x-0.5 transition-transform" />

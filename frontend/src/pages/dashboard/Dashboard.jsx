@@ -134,7 +134,7 @@ const Dashboard = () => {
                     <StatCard
                         title="Total Tests"
                         value={stats.totalTests}
-                        subtitle={`${stats.totalQuestions} questions attempted`}
+                        subtitle={`${stats.totalAttempted || 0} questions attempted`}
                         icon={Target}
                         colorClass="text-blue-600"
                         bgClass="bg-blue-50"

@@ -217,7 +217,90 @@ const Analysis = () => {
                         </button>
                     </div>
                 </div>
+
+
             </div>
+
+            {/* Proctoring Report - Full Width Section */}
+            {data.proctoringLogs && data.proctoringLogs.length > 0 && (
+                <div className="bg-white rounded-3xl shadow-lg border border-red-100 overflow-hidden print:break-before-page">
+                    {/* Header Section */}
+                    <div className="bg-gradient-to-r from-red-50 to-white px-8 py-6 border-b border-red-100 flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                            <div className="bg-white p-3 rounded-2xl shadow-sm border border-red-100">
+                                <AlertTriangle size={32} className="text-red-600" />
+                            </div>
+                            <div>
+                                <h3 className="text-2xl font-extrabold text-gray-900">Proctoring Integrity Report</h3>
+                                <p className="text-red-600 font-medium mt-1">
+                                    {data.proctoringLogs.length} violation(s) detected during this session
+                                </p>
+                            </div>
+                        </div>
+                        <div className="hidden md:block">
+                            <span className="bg-red-600 text-white text-sm font-bold px-4 py-2 rounded-lg shadow-red-200 shadow-md">
+                                Action Required
+                            </span>
+                        </div>
+                    </div>
+
+                    {/* Content Grid */}
+                    <div className="p-8 bg-gray-50/50">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                            {data.proctoringLogs.map((log, index) => (
+                                <div key={index} className="flex flex-col bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-xl transition-all duration-300 overflow-hidden group">
+                                    {/* Large Header Image */}
+                                    <div className="relative aspect-video w-full bg-gray-900 overflow-hidden">
+                                        {log.evidence ? (
+                                            <img
+                                                src={`http://localhost:5000${log.evidence}`}
+                                                alt={log.type}
+                                                className="w-full h-full object-contain bg-black/50 backdrop-blur-xl group-hover:scale-105 transition-transform duration-500"
+                                            />
+                                        ) : (
+                                            <div className="w-full h-full flex flex-col items-center justify-center text-gray-500 gap-3">
+                                                <AlertTriangle size={48} className="opacity-20 text-white" />
+                                                <span className="text-gray-400 font-medium">No Visual Evidence</span>
+                                            </div>
+                                        )}
+
+                                        {/* Floating Badge */}
+                                        <div className="absolute top-4 left-4">
+                                            <span className="bg-white/90 backdrop-blur text-gray-900 text-sm font-bold px-3 py-1 rounded-lg shadow-lg">
+                                                #{index + 1}
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    {/* Body */}
+                                    <div className="p-6 flex flex-col gap-4">
+                                        <div className="flex justify-between items-start border-b border-gray-100 pb-4">
+                                            <div>
+                                                <h4 className="text-lg font-black text-gray-900 uppercase tracking-tight">
+                                                    {log.type.replace(/_/g, ' ')}
+                                                </h4>
+                                                <p className="text-gray-500 text-sm mt-1">Detected Algorithmically</p>
+                                            </div>
+                                            <div className="bg-gray-100 px-3 py-1.5 rounded-lg flex items-center gap-2">
+                                                <Clock size={16} className="text-gray-500" />
+                                                <span className="font-mono font-bold text-gray-700">
+                                                    {log.timestamp ? new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '--:--'}
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        <div className="bg-red-50 p-4 rounded-xl border border-red-100">
+                                            <p className="text-red-800 font-medium text-sm leading-relaxed">
+                                                {log.message}
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Detailed Table */}
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden border-t border-gray-200">

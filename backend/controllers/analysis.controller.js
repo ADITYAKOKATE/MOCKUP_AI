@@ -121,7 +121,8 @@ exports.getAnalysis = async (req, res) => {
             subjectBreakdown,
             detailedBreakdown,
             createdAt: attempt.createdAt,
-            examType: attempt.examType
+            examType: attempt.examType,
+            proctoringLogs: attempt.proctoringLogs || [] // Add this line
         });
 
     } catch (err) {
