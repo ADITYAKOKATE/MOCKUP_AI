@@ -44,3 +44,7 @@ backend/llmModel/
 __pycache__/
 *.py[cod]
 *$py.class
+
+# Generated files
+backend/debug_images/
+backend/uploads/

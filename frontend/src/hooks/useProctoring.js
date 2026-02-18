@@ -108,6 +108,14 @@ export const useProctoring = (sessionId, onViolation, isActive = true, isEnabled
     }, [isActive]);
 
     // 4. Log Violation Helper
+    // Use a ref to track warnings count synchronously to avoid closure staleness
+    const warningsRef = useRef([]);
+
+    // Sync ref with state
+    useEffect(() => {
+        warningsRef.current = warnings;
+    }, [warnings]);
+
     const logViolation = async (type, message, evidence = null) => {
         // If evidence is null, try to capture a fresh screenshot
         if (!evidence && webcamRef.current) {
@@ -119,36 +127,25 @@ export const useProctoring = (sessionId, onViolation, isActive = true, isEnabled
             }
         }
 
-        const newWarning = { type, message, timestamp: new Date() };
+        const newWarning = { type, message, timestamp: new Date(), evidence }; // Include evidence in local state for immediate feedback if needed
 
-        // Use functional state update to ensure we have the latest count
+        // Optimistically update UI state
         setWarnings(prev => {
             const updated = [...prev, newWarning];
-
-            // Auto-Termination Logic (Trigger only once when threshold hit)
-            if (updated.length === 5) {
-                toast.error("⛔ MAX VIOLATIONS REACHED. TERMINATING TEST.", { duration: 5000 });
-                if (onViolation) onViolation({ ...newWarning, terminate: true }); // Signal termination
-            } else if (updated.length > 5) {
-                // Already terminated, don't spam
-            } else {
-                if (onViolation) onViolation(newWarning);
-            }
-
-            return updated.slice(-10); // Keep last 10
+            return updated.slice(-10);
         });
 
         try {
-            // Get token from localStorage (matching auth.service.js)
+            // Get token from localStorage
             const token = localStorage.getItem('token');
-
             if (!token) {
                 console.error("No auth token found, cannot log violation");
                 return;
             }
 
-            // Use fetch directly as api.post is not available
-            await fetch(`http://localhost:5000/api/test/session/${sessionId}/log-violation`, {
+            // 1. Log to Backend FIRST and AWAIT completion
+            console.log(`[useProctoring] Logging violation: ${type}...`);
+            const response = await fetch(`http://localhost:5000/api/test/session/${sessionId}/log-violation`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -156,8 +153,31 @@ export const useProctoring = (sessionId, onViolation, isActive = true, isEnabled
                 },
                 body: JSON.stringify({ type, message, evidence })
             });
+
+            if (!response.ok) {
+                throw new Error(`Failed to log violation: ${response.statusText}`);
+            }
+
+            console.log(`[useProctoring] Violation logged successfully.`);
+
+            // 2. Check for Termination Condition AFTER successful log
+            // We use the Ref to get the *current* count including the one we just added (effectively)
+            // Actually, we should just count based on what we know. 
+            // The backend also checks this, but frontend needs to trigger the exit.
+
+            const currentCount = warningsRef.current.length + 1; // +1 for the current one
+
+            if (currentCount >= 5) {
+                toast.error("⛔ MAX VIOLATIONS REACHED. TERMINATING TEST.", { duration: 5000 });
+                if (onViolation) onViolation({ ...newWarning, terminate: true });
+            } else {
+                if (onViolation) onViolation(newWarning);
+            }
+
         } catch (error) {
             console.error("Failed to log violation:", error);
+            // Even if backend fails, should we count it? 
+            // For now, assume yes to be safe, but we missed the evidence saving.
         }
     };
 
@@ -225,7 +245,9 @@ export const useProctoring = (sessionId, onViolation, isActive = true, isEnabled
             const result = await response.json();
 
             if (result.status === 'violation') {
-                logViolation(result.type, result.message, null);
+                // Pass the evidence (current image) to logViolation so it's saved!
+                // The AI service analyzes *this* frame, so this frame *is* the evidence.
+                await logViolation(result.type, result.message, imageSrc);
 
                 if (result.type === 'HIGH_MOVEMENT') {
                     toast.error("⚠️ Massive Movement Detected!");

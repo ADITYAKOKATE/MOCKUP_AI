@@ -223,9 +223,13 @@ const TestResults = ({ results, onBack }) => {
                                         {log.evidence && (
                                             <div className="relative group overflow-hidden rounded-lg border border-gray-200 mt-2">
                                                 <img
-                                                    src={`http://localhost:5000${log.evidence}`}
-                                                    alt="Violation Evidence"
+                                                    src={log.evidence.startsWith('http') ? log.evidence : `http://localhost:5000${log.evidence.startsWith('/') ? '' : '/'}${log.evidence}`}
+                                                    alt={`Violation Evidence - ${log.type}`}
                                                     className="w-full h-40 object-cover hover:scale-105 transition-transform duration-300"
+                                                    onError={(e) => {
+                                                        e.target.onerror = null;
+                                                        e.target.src = 'https://via.placeholder.com/300x200?text=Evidence+Not+Found';
+                                                    }}
                                                 />
                                                 <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors pointer-events-none" />
                                             </div>
