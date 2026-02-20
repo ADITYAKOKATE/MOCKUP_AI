@@ -9,6 +9,7 @@ dotenv.config();
 require('./models/User');
 require('./models/UserProfile');
 require('./models/AIChatHistory');
+require('./models/UserMemory');
 
 const app = express();
 

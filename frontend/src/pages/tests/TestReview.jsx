@@ -289,7 +289,7 @@ const TestReview = () => {
                                     <div className="mt-6 p-6 bg-white/80 backdrop-blur-sm rounded-2xl border border-blue-100 shadow-sm animate-in fade-in slide-in-from-bottom-4">
                                         <div className="flex items-center gap-2 mb-2 text-blue-700 font-bold text-sm uppercase tracking-wider">
                                             <Zap size={16} className="fill-current" />
-                                            AI Tutor Feedback
+                                            Luna's Feedback
                                         </div>
                                         <div className="text-gray-800 leading-relaxed">
                                             <QuestionRenderer content={currentQuestion.aiExplanation} />

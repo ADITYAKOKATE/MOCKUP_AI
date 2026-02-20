@@ -7,6 +7,12 @@ export const AudioRecorder = {
   analyser: null,
   exemplarAnimationId: null,
 
+  audioContext: null,
+  analyser: null,
+  exemplarAnimationId: null,
+  isSlicing: false,
+  resolveSlice: null,
+
   getDevices: async () => {
     if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
        return { mics: [], speakers: [] };
@@ -17,7 +23,7 @@ export const AudioRecorder = {
     return { mics, speakers };
   },
 
-  start: async (deviceId = null, onAmplitude = null, onMuteChange = null) => {
+  start: async (deviceId = null, onAmplitude = null, onMuteChange = null, onSilence = null, onVoiceStart = null, silenceThreshold = 0.03, silenceDuration = 1500) => {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       throw new Error("Microphone not supported");
     }
@@ -89,6 +95,28 @@ export const AudioRecorder = {
       if (event.data.size > 0) {
         AudioRecorder.audioChunks.push(event.data);
       }
+      
+      // If we are actively slicing, resolve it now that data is flushed
+      if (AudioRecorder.resolveSlice) {
+          const chunks = [...AudioRecorder.audioChunks];
+          AudioRecorder.audioChunks = []; // clear
+          const mimeType = AudioRecorder.mediaRecorder.mimeType || 'audio/webm';
+          const audioBlob = new Blob(chunks, { type: mimeType });
+          
+          if (audioBlob.size > 0) {
+                const reader = new FileReader();
+                reader.readAsDataURL(audioBlob);
+                reader.onloadend = () => {
+                    if (AudioRecorder.resolveSlice) AudioRecorder.resolveSlice(reader.result.split(',')[1]);
+                    AudioRecorder.resolveSlice = null;
+                    AudioRecorder.isSlicing = false;
+                };
+          } else {
+                if (AudioRecorder.resolveSlice) AudioRecorder.resolveSlice(null);
+                AudioRecorder.resolveSlice = null;
+                AudioRecorder.isSlicing = false;
+          }
+      }
     });
 
     AudioRecorder.mediaRecorder.start();
@@ -109,13 +137,16 @@ export const AudioRecorder = {
         AudioRecorder.analyser = analyser;
 
         const dataArray = new Uint8Array(analyser.frequencyBinCount);
-        let debugCounter = 0;
+        let lastUpdate = 0;
+        
+        // VAD State
+        let silenceStartTime = null;
+        let isCurrentlySpeaking = false;
         
         console.log(`🎤 AudioCtx: ${audioCtx.state}, Stream Active: ${stream.active}, Tracks: ${stream.getAudioTracks().length}`);
 
-        let lastUpdate = 0;
         const checkAmplitude = (timestamp) => {
-             if (!AudioRecorder.mediaRecorder || AudioRecorder.mediaRecorder.state === 'inactive') return;
+             if (!AudioRecorder.mediaRecorder || AudioRecorder.mediaRecorder.state === 'inactive' || AudioRecorder.isSlicing) return;
              
              if (timestamp - lastUpdate > 100) { // Throttle to ~10fps
                  analyser.getByteFrequencyData(dataArray);
@@ -125,7 +156,30 @@ export const AudioRecorder = {
                  const avg = sum / dataArray.length;
                  
                  const normalized = Math.min(1, (avg / 255) * 2.5);
-                 onAmplitude(normalized);
+                 if (onAmplitude) onAmplitude(normalized);
+                 
+                 // --- Voice Activity Detection (VAD) ---
+                 if (normalized > silenceThreshold) {
+                     // User is speaking
+                     silenceStartTime = null; // Reset silence timer
+                     if (!isCurrentlySpeaking) {
+                         isCurrentlySpeaking = true;
+                         if (onVoiceStart) onVoiceStart();
+                     }
+                 } else {
+                     // Silence detected
+                     if (isCurrentlySpeaking) {
+                         if (!silenceStartTime) {
+                             silenceStartTime = timestamp;
+                         } else if (timestamp - silenceStartTime >= silenceDuration) {
+                             // Silence has been sustained long enough
+                             isCurrentlySpeaking = false;
+                             silenceStartTime = null;
+                             if (onSilence) onSilence();
+                         }
+                     }
+                 }
+                 
                  lastUpdate = timestamp;
              }
              
@@ -179,6 +233,21 @@ export const AudioRecorder = {
 
       AudioRecorder.mediaRecorder.stop();
     });
+  },
+  
+  // Requests the current chunk from the media recorder without stopping it
+  sliceBuffer: () => {
+      return new Promise((resolve) => {
+          if (!AudioRecorder.mediaRecorder || AudioRecorder.mediaRecorder.state !== 'recording') {
+              return resolve(null);
+          }
+          
+          AudioRecorder.isSlicing = true; // Pause VAD processing
+          AudioRecorder.resolveSlice = resolve;
+          
+          // Request data flush which reliably triggers "dataavailable"
+          AudioRecorder.mediaRecorder.requestData();
+      });
   },
 
   setMute: (mute) => {

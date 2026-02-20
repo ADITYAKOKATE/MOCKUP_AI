@@ -25,13 +25,12 @@ class STTEngine:
             return ""
 
         try:
-            # faster-whisper optimizations:
-            # - beam_size=1 (Greedy search) is much faster than beam search
-            # - vad_filter=True with relaxed parameters to avoid cutting speech
+            # - auto-detect language to support English correctly
             segments, info = self.model.transcribe(
                 audio_source, 
-                beam_size=1, # Greedy search for speed
+                beam_size=1, 
                 language="en",
+                initial_prompt="Hello Luna! I have a question about my studies. Can you help me out?",
                 vad_filter=True, 
                 vad_parameters=dict(min_silence_duration_ms=500, threshold=0.5)
             )

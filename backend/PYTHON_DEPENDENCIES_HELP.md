@@ -5,6 +5,7 @@ This project uses a hybrid AI stack:
 2.  **Faster-Whisper**: For Speech-to-Text (STT).
 3.  **Edge-TTS**: For Text-to-Speech (TTS).
 4.  **Sentence-Transformers**: For Vector Memory Embeddings.
+5.  **DuckDuckGo-Search**: For real-time Web Search context.
 
 ## 🚀 Quick Setup
 
@@ -59,5 +60,5 @@ You should see `phi3-mini` in the list.
 
 Run this to verify Python can see all libraries:
 ```bash
-python -c "import requests; import faster_whisper; import sentence_transformers; import edge_tts; print('✅ ALL PYTHON DEPENDENCIES OK')"
+python -c "import requests; import faster_whisper; import sentence_transformers; import edge_tts; import duckduckgo_search; print('✅ ALL PYTHON DEPENDENCIES OK')"
 ```

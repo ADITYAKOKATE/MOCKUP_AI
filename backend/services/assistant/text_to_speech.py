@@ -4,7 +4,7 @@ import asyncio
 
 class TTSEngine:
     def __init__(self, model_name="en-US-AriaNeural", gpu=False):
-        print(f"🗣️ Loading TTS Engine (edge-tts)...", flush=True)
+        print(f"🗣️ Loading TTS Engine (edge-tts) with voice {model_name}...", flush=True)
         self.voice = model_name
         print("✅ TTS Engine Loaded (Async).", flush=True)
 

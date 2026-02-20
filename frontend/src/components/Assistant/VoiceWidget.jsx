@@ -5,7 +5,7 @@ import { useAssistant } from '../../hooks/useAssistant';
 
 const VoiceWidget = () => {
   const [isOpen, setIsOpen] = useState(false);
-  const [mode, setMode] = useState('live'); // 'live' | 'push'
+  const [mode, setMode] = useState('push'); // 'live' | 'push'
   const [showSettings, setShowSettings] = useState(false);
 
   const { 
@@ -24,7 +24,9 @@ const VoiceWidget = () => {
       selectedMicId,
       setSelectedMicId,
       selectedSpeakerId,
-      setSelectedSpeakerId
+      setSelectedSpeakerId,
+      webSearchEnabled,
+      setWebSearchEnabled
   } = useAssistant();
 
   // Auto-open if robot starts speaking or listening
@@ -41,7 +43,7 @@ const VoiceWidget = () => {
           {/* Header */}
           <div className="flex justify-between items-center mb-2 border-b border-slate-100 dark:border-slate-700 pb-2">
             <span className="text-sm font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-2">
-              AI Tutor
+              Luna - AI Tutor
               <span className={`text-[10px] px-2 py-0.5 rounded-full ${mode === 'live' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
                   {mode === 'live' ? 'Live Mode' : 'Push to Talk'}
               </span>
@@ -69,7 +71,7 @@ const VoiceWidget = () => {
                     <select 
                         value={selectedMicId} 
                         onChange={(e) => setSelectedMicId(e.target.value)}
-                        className="w-full p-2 rounded border dark:bg-slate-700 dark:border-slate-600"
+                        className="w-full p-2 rounded border dark:bg-slate-700 dark:border-slate-600 text-slate-800 dark:text-slate-200"
                     >
                         {devices.mics.map(d => (
                             <option key={d.deviceId} value={d.deviceId}>{d.label || `Mic ${d.deviceId.slice(0,5)}`}</option>
@@ -82,7 +84,7 @@ const VoiceWidget = () => {
                     <select 
                         value={selectedSpeakerId} 
                         onChange={(e) => setSelectedSpeakerId(e.target.value)}
-                        className="w-full p-2 rounded border dark:bg-slate-700 dark:border-slate-600"
+                        className="w-full p-2 rounded border dark:bg-slate-700 dark:border-slate-600 text-slate-800 dark:text-slate-200"
                     >
                         {devices.speakers.map(d => (
                             <option key={d.deviceId} value={d.deviceId}>{d.label || `Speaker ${d.deviceId.slice(0,5)}`}</option>
@@ -90,7 +92,16 @@ const VoiceWidget = () => {
                          {devices.speakers.length === 0 && <option>Default Output</option>}
                     </select>
                 </div>
-                <div className="text-slate-400 italic mt-2">
+                <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-200 dark:border-slate-700">
+                    <label className="font-semibold text-slate-600 dark:text-slate-400">Web Search</label>
+                    <button 
+                        onClick={() => setWebSearchEnabled(!webSearchEnabled)}
+                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${webSearchEnabled ? 'bg-indigo-600' : 'bg-slate-300 dark:bg-slate-600'}`}
+                    >
+                        <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${webSearchEnabled ? 'translate-x-5' : 'translate-x-1'}`} />
+                    </button>
+                </div>
+                <div className="text-slate-400 italic mt-1 pb-2">
                     Check browser permissions if devices are missing.
                 </div>
             </div>
@@ -196,8 +207,8 @@ const VoiceWidget = () => {
                 // Live Mode: Toggle Button
                 <>
                     <button
-                    onClick={startRecording}
-                    disabled={isListening || loading}
+                    onClick={() => startRecording(true)}
+                    disabled={isListening} // Only disable if actively listening so they don't double start, but don't disable on loading
                     className={`flex-1 py-3 px-4 rounded-xl flex items-center justify-center gap-2 text-sm font-bold transition-all shadow-sm ${
                         isListening 
                         ? 'hidden' // Hide start button when listening
@@ -237,7 +248,7 @@ const VoiceWidget = () => {
                 <button
                     onPointerDown={(e) => {
                         if (e.button !== 0 && e.pointerType === 'mouse') return; // Only left click for mouse
-                        if (!isListening && !loading) startRecording();
+                        if (!isListening) startRecording(false);
                     }}
                     onPointerUp={(e) => {
                         if (isListening) stopRecording();

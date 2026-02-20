@@ -15,7 +15,7 @@ const Sidebar = ({ isOpen, onClose }) => {
         { path: '/tests', label: 'Mock Tests', icon: <FileText size={20} /> },
         { path: '/my-tests', label: 'My Tests', icon: <BarChart2 size={20} /> },
         { path: '/analysis', label: 'Analysis', icon: <BarChart2 size={20} /> },
-        { path: '/ai-tutor', label: 'AI Tutor', icon: <BrainCircuit size={20} /> },
+        { path: '/ai-tutor', label: 'Luna (AI)', icon: <BrainCircuit size={20} /> },
     ];
 
     const getInitials = (name) => {

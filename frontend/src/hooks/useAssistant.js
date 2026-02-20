@@ -15,9 +15,13 @@ export const useAssistant = () => {
     const [devices, setDevices] = useState({ mics: [], speakers: [] });
     const [selectedMicId, setSelectedMicId] = useState('');
     const [selectedSpeakerId, setSelectedSpeakerId] = useState('');
+    const [webSearchEnabled, setWebSearchEnabled] = useState(false);
 
     const audioContextRefr = useRef(null);
     const currentAudioSource = useRef(null);
+    const requestQueueRef = useRef([]); // Stores queued audio chunks String (Base64)
+    const activeStreamRef = useRef(false); // Indicates if fetch is running
+    const abortControllerRef = useRef(null); // Used to instantly kill an active fetch
 
     useEffect(() => {
         // Load devices on mount
@@ -143,6 +147,14 @@ export const useAssistant = () => {
         setLoading(true);
         setCurrentEmotion('thinking');
         streamCompleteRef.current = false;
+        activeStreamRef.current = true;
+        
+        // Abort previous stream if exists (Barge-In)
+        if (abortControllerRef.current) {
+             abortControllerRef.current.abort();
+             abortControllerRef.current = null;
+        }
+        abortControllerRef.current = new AbortController();
         
         // Add placeholder message for Assistant
         const assistantMsgId = Date.now();
@@ -158,10 +170,12 @@ export const useAssistant = () => {
             const response = await fetch(`${api.API_PYTHON_URL}/assistant/chat/stream`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                signal: abortControllerRef.current.signal,
                 body: JSON.stringify({
                     user_id: user?._id || "anon",
                     message: text,
-                    audio_base64: audioBase64
+                    audio_base64: audioBase64,
+                    web_search_enabled: webSearchEnabled
                 })
             });
 
@@ -232,27 +246,99 @@ export const useAssistant = () => {
             }
 
         } catch (err) {
-            console.error("❌ [Frontend] Request Failed:", err);
-            setMessages(prev => [...prev.filter(m => m.id !== assistantMsgId), { id: Date.now(), role: 'assistant', text: "Sorry, connection failed.", emotion: 'sad' }]);
-            setCurrentEmotion('sad');
+            if (err.name === 'AbortError') {
+                 console.log("🛑 [Frontend] Stream Aborted (Barge-In).");
+                 // Remove thinking message if empty
+                 setMessages(prev => prev.filter(m => !(m.id === assistantMsgId && m.text === "")));
+            } else {
+                 console.error("❌ [Frontend] Request Failed:", err);
+                 setMessages(prev => [...prev.filter(m => m.id !== assistantMsgId), { id: Date.now(), role: 'assistant', text: "Sorry, connection failed.", emotion: 'sad' }]);
+                 setCurrentEmotion('sad');
+            }
         } finally {
             setLoading(false);
-            // Don't stop "speaking" immediately, audio might still play
+            activeStreamRef.current = false;
+            abortControllerRef.current = null;
+            // processNext in queue
+            processRequestQueue();
         }
+    };
+
+    const processRequestQueue = async () => {
+         if (activeStreamRef.current || requestQueueRef.current.length === 0) return;
+         
+         activeStreamRef.current = true;
+         const nextPayload = requestQueueRef.current.shift();
+         
+         if (nextPayload.text || nextPayload.audioBase64) {
+              await processResponse(nextPayload.text, nextPayload.audioBase64);
+         } else {
+              activeStreamRef.current = false;
+         }
     };
 
     const startTimeRef = useRef(0);
 
     const [isSystemMuted, setIsSystemMuted] = useState(false);
 
-    const startRecording = async () => {
+    const startRecording = async (isLiveMode = false) => {
         try {
             setIsSystemMuted(false);
+            
+            // Instantly kill any active stream/audio when starting a new recording (Barge-In)
+            if (abortControllerRef.current) {
+                abortControllerRef.current.abort();
+                abortControllerRef.current = null;
+            }
+            audioQueueRef.current = [];
+            isPlayingRef.current = false;
+            if (currentAudioSource.current) {
+                 try { currentAudioSource.current.stop(); } catch(e){}
+                 currentAudioSource.current = null;
+            }
+            setIsSpeaking(false);
+            setLoading(false);
+            requestQueueRef.current = [];
+            activeStreamRef.current = false;
+
+            // Queue functions for Live Mode
+            const handleVoiceStart = () => {
+                if (isLiveMode) {
+                    console.log("🗣️ [VAD] Voice Detected! Barging In...");
+                    if (abortControllerRef.current) {
+                        abortControllerRef.current.abort();
+                        abortControllerRef.current = null;
+                    }
+                    audioQueueRef.current = [];
+                    isPlayingRef.current = false;
+                    if (currentAudioSource.current) {
+                         try { currentAudioSource.current.stop(); } catch(e){}
+                         currentAudioSource.current = null;
+                    }
+                    setIsSpeaking(false);
+                    setLoading(false);
+                    requestQueueRef.current = [];
+                    activeStreamRef.current = false;
+                }
+            };
+            
+            const handleSilence = async () => {
+                 if (isLiveMode) {
+                     console.log("🤫 [VAD] Silence Detected. Queuing chunk...");
+                     const base64Chunk = await AudioRecorder.sliceBuffer();
+                     if (base64Chunk && base64Chunk.trim() !== '') {
+                          requestQueueRef.current.push({ text: null, audioBase64: base64Chunk });
+                          processRequestQueue();
+                     }
+                 }
+            };
+
             await AudioRecorder.start(selectedMicId, (amplitude) => {
                 setUserAudioAmplitude(amplitude);
             }, (muted) => {
                 setIsSystemMuted(muted);
-            });
+            }, handleSilence, handleVoiceStart, 0.08, 1800);
+            
             startTimeRef.current = Date.now();
             setIsListening(true);
         } catch (err) {
@@ -316,6 +402,8 @@ export const useAssistant = () => {
         setSelectedMicId,   // Export this
         selectedSpeakerId,  // Export this
         setSelectedSpeakerId, // Export this
+        webSearchEnabled,
+        setWebSearchEnabled,
         startRecording,
         stopRecording,
         sendText

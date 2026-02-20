@@ -1,22 +1,27 @@
 import React, { useState, useEffect, useRef } from 'react';
 import RobotAvatar from '../../components/Assistant/RobotAvatar';
-import VoiceWidget from '../../components/Assistant/VoiceWidget';
-import { Send, Mic, User, Bot, Loader2, StopCircle } from 'lucide-react';
+import { Send, Mic, User, Bot, Loader2, StopCircle, Plus, MessageSquare } from 'lucide-react';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { AudioRecorder } from '../../utils/audioRecorder';
+import { useAssistant } from '../../hooks/useAssistant';
 
 const ChatPage = () => {
   const { user } = useAuth();
-  const [messages, setMessages] = useState([
-    { id: 1, role: 'assistant', text: `Hello ${user?.name || "Student"}! I'm your AI Exam Mentor. How can I help you study today?`, emotion: 'happy' }
-  ]);
+  const {
+      messages,
+      loading,
+      isListening,
+      isSpeaking,
+      currentEmotion,
+      audioAmplitude,
+      startRecording,
+      stopRecording,
+      sendText
+  } = useAssistant();
+  
+  const [chatHistory, setChatHistory] = useState([]);
   const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [isListening, setIsListening] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const [currentEmotion, setCurrentEmotion] = useState('neutral');
-  const [audioAmplitude, setAudioAmplitude] = useState(0);
   
   const chatEndRef = useRef(null);
   const audioContextRefr = useRef(null);
@@ -36,255 +41,177 @@ const ChatPage = () => {
         api.assistantHistory(user._id)
            .then(history => {
                if(history && history.length > 0) {
-                   // Map backend history format to frontend
                    const mapped = history.map((msg, i) => ({
                        id: msg._id || i,
                        role: msg.role,
                        text: msg.content
                    }));
-                   // Keep initial greeting if history is empty, else replace
-                   setMessages(mapped);
+                   setChatHistory(mapped);
+               } else {
+                   setChatHistory([]); // strictly no mock data
                }
            })
-           .catch(err => console.error(err));
+           .catch(err => {
+               console.error(err);
+               setChatHistory([]);
+           });
     }
   }, [user]);
-
-  const playResponseAudio = async (base64Audio) => {
-      if (!base64Audio) return;
-
-      try {
-          // Initialize Audio Context if needed
-          if (!audioContextRefr.current) {
-              audioContextRefr.current = new (window.AudioContext || window.webkitAudioContext)();
-          }
-          
-          const audioCtx = audioContextRefr.current;
-          
-          // Decode
-          const binaryString = window.atob(base64Audio);
-          const len = binaryString.length;
-          const bytes = new Uint8Array(len);
-          for (let i = 0; i < len; i++) {
-              bytes[i] = binaryString.charCodeAt(i);
-          }
-          
-          const audioBuffer = await audioCtx.decodeAudioData(bytes.buffer);
-          
-          // Play
-          if (currentAudioSource.current) {
-              currentAudioSource.current.stop();
-          }
-          
-          const source = audioCtx.createBufferSource();
-          source.buffer = audioBuffer;
-          
-          // Analyser for Lip Sync
-          const analyser = audioCtx.createAnalyser();
-          analyser.fftSize = 32;
-          source.connect(analyser);
-          analyser.connect(audioCtx.destination);
-          
-          currentAudioSource.current = source;
-          
-          source.start(0);
-          setIsSpeaking(true);
-          
-          // Animation Loop
-          const dataArray = new Uint8Array(analyser.frequencyBinCount);
-          const updateAmplitude = () => {
-              if(!isSpeaking) return;
-              analyser.getByteFrequencyData(dataArray);
-              let sum = 0;
-              for(let i=0; i < dataArray.length; i++) sum += dataArray[i];
-              const avg = sum / dataArray.length; // 0-255
-              setAudioAmplitude(avg / 255); // 0-1
-              
-              if(isSpeaking) requestAnimationFrame(updateAmplitude);
-          };
-          updateAmplitude();
-          
-          source.onended = () => {
-              setIsSpeaking(false);
-              setAudioAmplitude(0);
-              setCurrentEmotion('neutral');
-          };
-          
-      } catch (err) {
-          console.error("Audio Playback Error:", err);
-          setIsSpeaking(false);
-      }
-  };
-
-  const processResponse = async (text, audioBase64 = null) => {
-    // Optimistic User UI update handled in handleSend
-    
-    setLoading(true);
-    setCurrentEmotion('thinking');
-
-    try {
-        const response = await api.assistantChat(user?._id || "anon", text, audioBase64);
-        
-        // Add Assistant Message
-        const aiMsg = {
-            id: Date.now(),
-            role: 'assistant',
-            text: response.text,
-            emotion: response.emotion
-        };
-        setMessages(prev => [...prev, aiMsg]);
-        setCurrentEmotion(response.emotion);
-        
-        // Execute Commands (Placeholder for now)
-        if (response.command) {
-            console.log("EXECUTE COMMAND:", response.command);
-            // Example: if(response.command.action === 'start_test') navigate('/tests');
-        }
-
-        // Play Audio
-        if (response.audio) {
-            playResponseAudio(response.audio);
-        } else {
-             setTimeout(() => setCurrentEmotion('neutral'), 3000);
-        }
-
-    } catch (err) {
-        console.error(err);
-        setMessages(prev => [...prev, { id: Date.now(), role: 'assistant', text: "Sorry, I had trouble processing that.", emotion: 'sad' }]);
-        setCurrentEmotion('sad');
-    } finally {
-        setLoading(false);
-    }
-  };
 
   const handleSend = async () => {
     if (!input.trim()) return;
     const text = input;
-    
-    setMessages(prev => [...prev, { id: Date.now(), role: 'user', text: text }]);
     setInput('');
-    
-    await processResponse(text, null);
-  };
-
-  const handleVoiceStart = async () => {
-      try {
-          await AudioRecorder.start();
-          setIsListening(true);
-      } catch (err) {
-          alert("Could not access microphone");
-          console.error(err);
-      }
-  };
-  
-  const handleVoiceEnd = async () => {
-      setIsListening(false);
-      setLoading(true);
-      setCurrentEmotion('thinking');
-      try {
-          const audioBase64 = await AudioRecorder.stop();
-          // Send to backend
-          await processResponse(null, audioBase64);
-      } catch (err) {
-          console.error(err);
-          setLoading(false);
-      }
+    await sendText(text);
+    // Optimistically update history sidebar
+    setChatHistory(prev => [{ role: 'user', text: text }, ...prev]);
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-4rem)] bg-slate-50 dark:bg-slate-900">
-      
-      {/* Header / Avatar Area */}
-      <div className="flex-none h-64 bg-indigo-50 dark:bg-slate-800 flex flex-col items-center justify-center border-b border-indigo-100 dark:border-slate-700 relative overflow-hidden">
-        <div className="absolute inset-0 bg-grid-slate-200 [mask-image:linear-gradient(0deg,white,transparent)] dark:bg-grid-slate-700/25"></div>
-        <div className="z-10 w-full max-w-md">
-           <RobotAvatar 
-              emotion={currentEmotion} 
-              speaking={isSpeaking} 
-              amplitude={audioAmplitude} 
-           />
+    // Replaced absolute offset with w-full h-full to cleanly fill Layout content area without borders
+    <div className="w-full h-full flex flex-col lg:flex-row gap-4 overflow-hidden">
+        
+        {/* Inner Sidebar: Chat History */}
+        <div className="hidden lg:flex w-[320px] bg-white rounded-2xl flex-col overflow-hidden shadow-sm border border-gray-200">
+            <div className="p-5">
+                <button 
+                  onClick={() => {/* Only aesthetic clear for hackathon */ window.location.reload() }}
+                  className="w-full bg-[#4F46E5] hover:bg-indigo-700 text-white font-semibold py-3.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-all shadow-md shadow-indigo-200/50"
+                >
+                    <Plus size={18} />
+                    New Conversation
+                </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto px-1 py-2 space-y-4">
+                <div>
+                     <span className="px-4 text-[11px] font-bold text-gray-400 uppercase tracking-widest">Recent Activity</span>
+                     <div className="mt-3 space-y-1">
+                         {chatHistory.filter(m => m.role === 'user').slice(-8).reverse().map((msg, idx) => (
+                             <button 
+                                key={idx} 
+                                onClick={() => {/* Optional: load specific history context */}}
+                                className="w-full text-left px-4 py-2.5 rounded-lg hover:bg-gray-50 flex items-start gap-3 transition-colors group"
+                             >
+                                 <MessageSquare size={16} className="text-gray-300 shrink-0 mt-0.5 group-hover:text-indigo-400 transition-colors" />
+                                 <p className="text-[13px] text-gray-500 truncate font-medium group-hover:text-indigo-600 transition-colors">{msg.text}</p>
+                             </button>
+                         ))}
+                         {chatHistory.filter(m => m.role === 'user').length === 0 && (
+                             <p className="text-xs text-gray-400 text-center py-4">No recent chats</p>
+                         )}
+                     </div>
+                </div>
+            </div>
+            
+            {/* Luna Status inside sidebar bottom */}
+            <div className="p-4 mt-auto bg-white border-t border-gray-100">
+                <div className="flex items-center gap-3">
+                     {/* Properly scaled down minimal avatar container */}
+                     <div className="w-10 h-10 rounded-xl border border-indigo-100/50 flex items-center justify-center overflow-hidden shrink-0 relative shadow-sm blur-[0.3px]">
+                         {/* Scale down and center correctly against its own anchor block */}
+                         <div className="absolute inset-[-10px] flex items-center justify-center scale-50">
+                            <RobotAvatar 
+                                emotion={currentEmotion} 
+                                speaking={isSpeaking} 
+                                amplitude={audioAmplitude} 
+                            />
+                         </div>
+                     </div>
+                     <div>
+                         <p className="text-[14px] font-bold text-gray-800">Luna AI</p>
+                         <p className="text-[12px] text-emerald-500 font-bold flex items-center gap-1.5 mt-0.5"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Online & Listening</p>
+                     </div>
+                </div>
+            </div>
         </div>
-        <div className="z-10 text-center mt-2">
-            <h2 className="text-xl font-bold text-slate-700 dark:text-slate-200">Exam Mentor AI</h2>
-            <p className="text-sm text-slate-500 dark:text-slate-400">
-                {isListening ? "Listening..." : isSpeaking ? "Speaking..." : loading ? "Thinking..." : "Online"}
-            </p>
-        </div>
-      </div>
 
-      {/* Chat History */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.map((msg) => (
-          <div 
-            key={msg.id} 
-            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-          >
-            <div className={`flex items-end max-w-[80%] gap-2 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${msg.role === 'user' ? 'bg-indigo-600' : 'bg-emerald-500'}`}>
-                {msg.role === 'user' ? <User size={16} className="text-white" /> : <Bot size={16} className="text-white" />}
-              </div>
-              
-              <div className={`p-4 rounded-2xl shadow-sm ${
-                msg.role === 'user' 
-                  ? 'bg-indigo-600 text-white rounded-tr-none' 
-                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-tl-none'
-              }`}>
-                <p className="text-sm leading-relaxed">{msg.text}</p>
+        {/* Main Chat Area */}
+        <div className="flex-1 bg-white rounded-2xl flex flex-col overflow-hidden shadow-sm border border-gray-200">
+
+            {/* Chat Messages */}
+            <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-8 bg-[#FAFAFA]">
+              {messages.length === 0 && (
+                  <div className="h-full w-full flex flex-col items-center justify-center text-center opacity-70">
+                      <div className="w-16 h-16 bg-indigo-50 rounded-full flex items-center justify-center mb-4 border border-indigo-100 shadow-sm">
+                          <Bot size={32} className="text-indigo-400" />
+                      </div>
+                      <p className="text-lg font-bold text-gray-600">Start a conversation with Luna</p>
+                      <p className="text-sm text-gray-400 max-w-sm mt-2">She's your personal Exam Mentor ready to help you prepare.</p>
+                  </div>
+              )}
+              {messages.map((msg) => (
+                <div 
+                  key={msg.id} 
+                  className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} w-full`}
+                >
+                  <div className={`flex items-end max-w-[70%] gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+                    
+                    {/* Tiny Avatar Base */}
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 shadow-sm border-2 border-white ${msg.role === 'user' ? 'bg-[#2563EB]' : 'bg-[#8B5CF6] z-10'}`}>
+                      {msg.role === 'user' ? <User size={14} className="text-white" /> : <Bot size={14} className="text-white" />}
+                    </div>
+                    
+                    {/* Message Bubble - Styled accurately like screenshot */}
+                    <div className={`px-6 py-4 rounded-2xl shadow-sm ${
+                      msg.role === 'user' 
+                        ? 'bg-[#2563EB] text-white rounded-br-sm' 
+                        : 'bg-white text-gray-700 border border-gray-100 rounded-bl-sm font-medium'
+                    }`}>
+                      <p className="text-[14px] leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+                    </div>
+                    
+                  </div>
+                </div>
+              ))}
+              {loading && (
+                <div className="flex justify-start w-full">
+                   <div className="flex items-end max-w-[70%] gap-3 flex-row">
+                      <div className="w-8 h-8 rounded-full bg-[#8B5CF6] flex items-center justify-center shadow-sm border-2 border-white z-10">
+                          <Loader2 size={14} className="text-white animate-spin" />
+                      </div>
+                      <div className="bg-white px-6 py-4 rounded-2xl rounded-bl-sm shadow-sm border border-gray-100">
+                          <span className="text-sm font-medium text-gray-400 flex items-center gap-2">Generating response<span className="animate-pulse">...</span></span>
+                      </div>
+                   </div>
+                </div>
+              )}
+              <div ref={chatEndRef} className="h-4" />
+            </div>
+
+            {/* Input Area */}
+            <div className="flex-none p-4 md:px-8 md:py-5 border-t border-gray-100 bg-white">
+              <div className="max-w-4xl mx-auto flex gap-3 h-14 items-center">
+                <input
+                  type="text"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+                  placeholder="Ask Luna a question..."
+                  className="flex-1 h-full px-5 rounded-2xl bg-gray-50 border border-gray-100 focus:border-indigo-500 focus:bg-white focus:ring-4 focus:ring-indigo-500/10 transition-all text-sm font-medium text-gray-700 placeholder-gray-400 outline-none"
+                  disabled={loading || isListening}
+                />
+                <button
+                  onClick={() => isListening ? stopRecording() : startRecording(false)}
+                  className={`h-full aspect-square rounded-2xl transition-all flex items-center justify-center ${
+                    isListening 
+                    ? 'bg-red-500 text-white shadow-md shadow-red-200 animate-pulse' 
+                    : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
+                  }`}
+                >
+                  {isListening ? <StopCircle size={20} /> : <Mic size={20} />}
+                </button>
+                <button
+                  onClick={handleSend}
+                  disabled={!input.trim() || loading}
+                  className="h-full aspect-square bg-[#8B5CF6] hover:bg-purple-600 disabled:opacity-50 disabled:hover:bg-[#8B5CF6] text-white rounded-2xl transition-all shadow-md shadow-purple-200 flex items-center justify-center"
+                >
+                  <Send size={20} />
+                </button>
               </div>
             </div>
-          </div>
-        ))}
-        {loading && (
-          <div className="flex justify-start">
-             <div className="flex items-end gap-2">
-                <div className="w-8 h-8 rounded-full bg-emerald-500 flex items-center justify-center">
-                    <Loader2 size={16} className="text-white animate-spin" />
-                </div>
-                <div className="bg-white dark:bg-slate-800 p-3 rounded-2xl rounded-tl-none shadow-sm border border-slate-200 dark:border-slate-700">
-                    <span className="text-xs text-slate-400">Thinking...</span>
-                </div>
-             </div>
-          </div>
-        )}
-        <div ref={chatEndRef} />
-      </div>
-
-      {/* Input Area */}
-      <div className="flex-none p-4 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700">
-        <div className="max-w-4xl mx-auto flex gap-2">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            placeholder="Ask a question..."
-            className="flex-1 px-4 py-3 rounded-xl bg-slate-100 dark:bg-slate-900 border-transparent focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-950 focus:ring-0 transition-all"
-            disabled={loading || isListening}
-          />
-          <button
-            onClick={isListening ? handleVoiceEnd : handleVoiceStart}
-            className={`p-3 rounded-xl transition-colors ${
-              isListening 
-              ? 'bg-red-500 text-white animate-pulse' 
-              : 'bg-slate-100 dark:bg-slate-700 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-600'
-            }`}
-          >
-            {isListening ? <StopCircle size={20} /> : <Mic size={20} />}
-          </button>
-          <button
-            onClick={handleSend}
-            disabled={!input.trim() || loading}
-            className="p-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl transition-colors"
-          >
-            <Send size={20} />
-          </button>
+            
         </div>
-      </div>
-      
-      {/* Floating Voice Widget */}
-      {/* Voice Widget now global in Layout */}
-      {/* <VoiceWidget ... /> removed to prevent duplication */}
-
     </div>
   );
 };

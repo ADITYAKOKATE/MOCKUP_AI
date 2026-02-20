@@ -1,7 +1,7 @@
 import os
 import pymongo
 from sentence_transformers import SentenceTransformer
-from datetime import datetime
+from datetime import datetime, timezone
 from bson import ObjectId
 
 class MemoryService:
@@ -16,7 +16,7 @@ class MemoryService:
         
         # AI Specific Models
         self.chat_history_collection = self.db['aichathistories'] # Using the new Mongoose model collection
-        self.user_memories = self.db['user_memories']
+        self.user_memories = self.db['usermemories'] # Match Mongoose default pluralization
         
         # Load Embedding Model
         try:
@@ -140,8 +140,8 @@ class MemoryService:
             "content": content,
             "emotion": emotion,
             "metadata": {},
-            "createdAt": datetime.utcnow(),
-            "updatedAt": datetime.utcnow(),
+            "createdAt": datetime.now(timezone.utc),
+            "updatedAt": datetime.now(timezone.utc),
             "__v": 0
         })
 
@@ -165,34 +165,61 @@ class MemoryService:
             })
         return mapped_history
 
-    def store_memory(self, user_id: str, content: str):
-        """Stores a long-term memory with vector embedding"""
+    def store_memory(self, user_id: str, content: str, source: str = "interaction"):
+        """Stores a long-term memory with vector embedding in the user's growing record"""
         if not self.model:
             return
         
+        try:
+            user_oid = ObjectId(user_id)
+        except:
+            user_oid = user_id
+            
         embedding = self.model.encode(content).tolist()
         
-        self.user_memories.insert_one({
-            "user_id": user_id,
+        memory_item = {
             "content": content,
             "embedding": embedding,
-            "timestamp": datetime.utcnow()
-        })
+            "source": source,
+            "createdAt": datetime.now(timezone.utc)
+        }
+        
+        # Upsert the memory into the user's single UserMemory document
+        self.user_memories.update_one(
+            {"userId": user_oid},
+            {
+                "$push": {"memories": memory_item},
+                "$setOnInsert": {"createdAt": datetime.now(timezone.utc)},
+                "$set": {"updatedAt": datetime.now(timezone.utc)}
+            },
+            upsert=True
+        )
         print(f"💾 Memory Stored for {user_id}: {content[:30]}...")
 
     def retrieve_memories(self, user_id: str, query: str, limit: int = 3):
-        """Semantic search for relevant memories"""
+        """Semantic search for relevant memories in the user's growing record"""
         if not self.model:
             return []
             
         try:
+            try:
+                user_oid = ObjectId(user_id)
+            except:
+                user_oid = user_id
+                
             from sklearn.metrics.pairwise import cosine_similarity
             query_embedding = self.model.encode(query).tolist()
             
-            candidates = list(self.user_memories.find({"user_id": user_id}).sort("timestamp", -1).limit(50))
+            # Fetch the single user document
+            user_memory_doc = self.user_memories.find_one({"userId": user_oid})
             
-            if not candidates:
+            if not user_memory_doc or not user_memory_doc.get("memories"):
                 return []
+            
+            memories_array = user_memory_doc["memories"]
+            
+            # Sort chronologically, taking the 100 most recent items to cap computation
+            candidates = sorted(memories_array, key=lambda x: x.get("createdAt", datetime.min), reverse=True)[:100]
             
             candidate_embeddings = [c['embedding'] for c in candidates]
             scores = cosine_similarity([query_embedding], candidate_embeddings)[0]

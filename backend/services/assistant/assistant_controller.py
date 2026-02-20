@@ -12,6 +12,7 @@ import asyncio
 import json
 import traceback
 from dotenv import load_dotenv
+from ddgs import DDGS
 
 # Load env vars
 load_dotenv()
@@ -79,6 +80,7 @@ class ChatRequest(BaseModel):
     user_id: str
     message: Optional[str] = None
     audio_base64: Optional[str] = None
+    web_search_enabled: Optional[bool] = False
 
 @router.on_event("startup")
 async def startup_event():
@@ -144,21 +146,47 @@ async def chat_endpoint(request: ChatRequest):
     context_memories = memory.retrieve_memories(user_id=request.user_id, query=user_text)
     user_context = memory.get_user_context(user_id=request.user_id)
     
-    context_str = "\n".join(context_memories)
+    # 2.5 Web Search Context
+    web_context_str = ""
+    if getattr(request, 'web_search_enabled', False) and user_text:
+        try:
+            print(f"🌐 [Web Search] Searching for: '{user_text}'", flush=True)
+            results = DDGS().text(user_text, max_results=2)
+            if results:
+                web_context_str = "Recent Web Search Context:\\n" + "\\n".join([f"- {r.get('body', '')}" for r in results])
+        except Exception as e:
+            print(f"❌ [Web Search] Error: {e}", flush=True)
+
+    context_str = "\\n".join(context_memories)
+    if web_context_str:
+        context_str = f"{web_context_str}\\n\\nPrevious Memories:\\n{context_str}"
+        
+    current_time_str = datetime.now().astimezone().strftime("%A, %B %d, %Y %I:%M %p %Z")
     
     # 3. Construct Prompt
-    system_prompt = f"""You are a helpful, encouraging AI Exam Tutor for students preparing for competitive exams (GATE, JEE, NEET).
+    system_prompt = f"""You are Luna, a highly empathetic, warm, and personal human-like Exam Mentor for {user_context['name']}. You are helping them prepare for {user_context['exams']}.
+    
+    Current Date and Time: {current_time_str}
     
     User Profile:
     - Name: {user_context['name']}
-    - Preparing for: {user_context['exams']}
+    - Target Exams: {user_context['exams']}
     - Strong Areas: {user_context['strong_areas']}
-    - Weak Areas: {user_context['weak_areas']} (Focus on improving these)
+    - Weak Areas: {user_context['weak_areas']} (Focus on improving these gently)
     
-    Guidelines:
-    - Keep responses concise, motivating, and strictly relevant to the query.
-    - If the user asks to start a test or analysis, output a JSON command: ```json {{"action": "start_test", ...}}```.
-    - Reference their specific weak areas if relevant to the question.
+    Your Persona (CRITICAL):
+    - Your name is Luna. You are a female mentor.
+    - Speak exactly like a supportive human teacher. Address them by their name occasionally.
+    - Show genuine emotion (excitement for progress, empathy for struggles).
+    - Use conversational fillers naturally (e.g., "Hmm,", "Wow!", "Oh,").
+    - Avoid sounding generic. Never say "As an AI..."
+    
+    Your Goals:
+    1. STRICTLY answer exactly what the user asks based ONLY on the User Profile and Context. Do not hallucinate or guess.
+    2. Answer naturally and conversationally. Do not be overly rigid, but NEVER give incorrect information about the user's data (e.g. do not confuse strong areas with weak areas).
+    3. Be motivating, personal, and helpful. Feel free to offer proactive suggestions to the user like a great teacher would.
+    4. If the user asks for an action, speak a short natural confirmation (e.g., "Got it! Starting your test now.") and then output the JSON: ```json {{"action": "start_test", ...}}```
+    5. Always default to the SI (Metric) system for measurements and data unless the user explicitly requests otherwise.
     
     Context from previous conversations:
     {context_str}
@@ -180,9 +208,10 @@ async def chat_endpoint(request: ChatRequest):
     memory.add_chat_message(request.user_id, "assistant", clean_text, emotion=emotion)
     
     # 7. Update Long-Term Memory (Async ideally, but sync for now)
-    # Only store if it seems like a fact/preference
-    if any(k in user_text.lower() for k in ["i like", "i hate", "my name is", "i am good at"]):
-        memory.store_memory(request.user_id, f"User said: {user_text}")
+    # Only store if it seems like a fact/preference or study habit
+    memory_keywords = ["i like", "i hate", "my name is", "i am good at", "my weak subject", "i struggle with", "i need help with", "i want to focus on", "i am preparing for"]
+    if any(k in user_text.lower() for k in memory_keywords):
+        memory.store_memory(request.user_id, f"Observation: User mentioned - {user_text}")
 
     # 8. TTS Generation
     audio_response_b64 = None
@@ -248,7 +277,7 @@ async def chat_stream_endpoint(request: ChatRequest):
             # For specific memory search, we need the text.
             # Strategy: Fetch Profile NOW. Fetch Memories LATER (after STT).
             
-            user_context_future = asyncio.to_thread(memory.get_user_context, request.user_id)
+            user_context_future = asyncio.create_task(asyncio.to_thread(memory.get_user_context, request.user_id))
             
             # 1. Process Voice if Present
             if request.audio_base64:
@@ -290,30 +319,54 @@ async def chat_stream_endpoint(request: ChatRequest):
             print(f"🧠 [Flow] Context for: '{user_text}'")
             context_memories = await asyncio.to_thread(memory.retrieve_memories, user_id=request.user_id, query=user_text)
             
-            context_str = "\n".join(context_memories)
+            # --- Web Search ---
+            web_context_str = ""
+            if getattr(request, 'web_search_enabled', False) and user_text:
+                 try:
+                      print(f"🌐 [Web Search] Searching for: '{user_text}'", flush=True)
+                      results = await asyncio.to_thread(lambda: DDGS().text(user_text, max_results=2))
+                      if results:
+                           web_context_str = "Recent Web Search Context:\\n" + "\\n".join([f"- {r.get('body', '')}" for r in results])
+                 except Exception as e:
+                      print(f"❌ [Web Search] Error: {e}", flush=True)
+
+            context_str = "\\n".join(context_memories)
+            if web_context_str:
+                 context_str = f"{web_context_str}\\n\\nPrevious Memories:\\n{context_str}"
             
             # 3. Construct Prompt
             # 3. Construct Prompt - Optimized for Ollama/Phi-3
-            system_prompt = f"""You are a smart and encouraging AI Exam Mentor for students preparing for competitive exams (GATE, JEE, NEET).
+            # 3. Construct Prompt - Optimized for Ollama/Phi-3
+            system_prompt = f"""You are Luna, a highly empathetic, warm, and personal human-like Exam Mentor for {user_context['name']}. You are helping them prepare for {user_context['exams']}.
             
             User Profile:
             - Name: {user_context['name']}
             - Target Exams: {user_context['exams']}
+            - Strong Areas: {user_context['strong_areas']}
             - Weak Areas: {user_context['weak_areas']}
             
+            Your Persona (CRITICAL REQUIRED):
+            - Your name is Luna. You are a female mentor.
+            - Speak exactly like a supportive human teacher. Use their name naturally.
+            - Show genuine emotion (excitement for progress, empathy for struggles).
+            - Use conversational fillers naturally (e.g., "Hmm,", "Wow!", "Oh,").
+            - Avoid sounding like a generic robot AI. Don't say "As an AI..."
+            - Be extremely conversational and friendly.
+            
             Your Goals:
-            1. Answer with EXTREME BREVITY. Keep spoken responses under 2-3 sentences max.
-            2. Be motivating but direct. Do not waffle.
-            3. If the user asks for an action, speak a short confirmation (e.g., "Starting test now.") and then output the JSON.
+            1. STRICTLY answer exactly what the user asks based ONLY on the User Profile and Context. Do not hallucinate or guess.
+            2. Answer naturally and conversationally. Keep responses reasonably concise but fully answer the user's questions. NEVER give incorrect information about the user's data (e.g. do not confuse strong areas with weak areas).
+            3. Be motivating and personal. Feel free to offer helpful suggestions or general advice like a human teacher would.
+            4. If the user asks for an action, speak a short natural confirmation (e.g., "I'd love to help! Starting your test now.") and then output the JSON.
+            5. Always default to the SI (Metric) system for measurements and data unless the user explicitly requests otherwise.
             
             IMPORTANT:
-            - SPOKEN RESPONSE MUST BE SHORT (Maximum 30 words).
-            - DO NOT lecture the user.
             - ALWAYS speak to the user first.
+            - Feel free to elaborate if the user needs a thorough explanation, but stay engaging.
             
             Example:
             User: "Start a mock test."
-            Assistant: "Sure! Starting a Math mock test for you."
+            Assistant: "Sure thing, {user_context['name']}! Let's get that Math mock test started for you."
             ```json
             {{"action": "start_test", "subject": "Math"}}
             ```
@@ -473,8 +526,9 @@ async def chat_stream_endpoint(request: ChatRequest):
             memory.add_chat_message(request.user_id, "assistant", clean_text, emotion=emotion)
             print(f"📝 [History] Assistant Message Saved.")
             
-            if any(k in user_text.lower() for k in ["i like", "i hate", "my name is", "i am good at"]):
-                memory.store_memory(request.user_id, f"User said: {user_text}")
+            memory_keywords = ["i like", "i hate", "my name is", "i am good at", "my weak subject", "i struggle with", "i need help with", "i want to focus on", "i am preparing for"]
+            if any(k in user_text.lower() for k in memory_keywords):
+                memory.store_memory(request.user_id, f"Observation: User mentioned - {user_text}")
 
             # Yield Meta
             await response_queue.put(json.dumps({"type": "meta", "emotion": emotion, "command": command}) + "\n")
