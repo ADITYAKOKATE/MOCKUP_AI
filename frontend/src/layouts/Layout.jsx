@@ -2,16 +2,17 @@ import React, { useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
-
+import VoiceWidget from '../components/Assistant/VoiceWidget';
 const Layout = () => {
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
 
     const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
 
     return (
         <div className="flex h-screen bg-[#F8FAFC] text-[#1E293B] font-sans print:h-auto print:block">
             {/* Sidebar Component */}
-            <div className="print:hidden">
+            <div className="print:hidden h-full flex-none">
                 <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
             </div>
 
@@ -23,8 +24,11 @@ const Layout = () => {
                 </div>
 
                 {/* Content Outlet */}
-                <div className="flex-1 overflow-auto p-4 md:p-8 bg-[#F8FAFC] print:p-0 print:overflow-visible">
+                <div className="flex-1 overflow-auto p-4 md:p-8 bg-[#F8FAFC] print:p-0 print:overflow-visible relative">
                     <Outlet />
+                    
+                    {/* Global AI Voice Widget */}
+                    <VoiceWidget />
                 </div>
             </main>
         </div>

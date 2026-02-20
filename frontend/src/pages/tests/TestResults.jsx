@@ -223,7 +223,7 @@ const TestResults = ({ results, onBack }) => {
                                         {log.evidence && (
                                             <div className="relative group overflow-hidden rounded-lg border border-gray-200 mt-2">
                                                 <img
-                                                    src={log.evidence.startsWith('http') ? log.evidence : `http://localhost:5000${log.evidence.startsWith('/') ? '' : '/'}${log.evidence}`}
+                                                    src={log.evidence.startsWith('http') ? log.evidence : `${import.meta.env.VITE_BACKEND_URL}${log.evidence.startsWith('/') ? '' : '/'}${log.evidence}`}
                                                     alt={`Violation Evidence - ${log.type}`}
                                                     className="w-full h-40 object-cover hover:scale-105 transition-transform duration-300"
                                                     onError={(e) => {

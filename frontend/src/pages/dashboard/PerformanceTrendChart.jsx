@@ -85,7 +85,7 @@ const PerformanceTrendChart = ({ trendData }) => {
             </div>
 
             {/* Chart Container */}
-            <div className="h-[300px] w-full">
+            <div style={{ width: '100%', height: 300, minWidth: 0, minHeight: 0 }}>
                 <ResponsiveContainer width="100%" height="100%">
                     {viewMode === 'overall' ? (
                         <AreaChart data={trendData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>

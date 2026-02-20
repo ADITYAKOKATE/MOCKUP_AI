@@ -1,10 +1,23 @@
-requests
-beautifulsoup4
-pymongo
-python-dotenv
-lxml
-gpt4all
-huggingface_hub
 fastapi
 uvicorn
+python-dotenv
+python-multipart
 pydantic
+requests
+websockets
+# Database
+pymongo
+# Audio & STT
+numpy
+soundfile
+librosa
+faster-whisper
+# Text-to-Speech
+edge-tts
+# AI & ML
+sentence-transformers
+ultralytics
+opencv-python
+# Utilities
+beautifulsoup4
+lxml

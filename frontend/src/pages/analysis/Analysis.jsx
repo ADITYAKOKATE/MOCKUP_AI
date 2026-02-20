@@ -253,7 +253,7 @@ const Analysis = () => {
                                     <div className="relative aspect-video w-full bg-gray-900 overflow-hidden">
                                         {log.evidence ? (
                                             <img
-                                                src={`http://localhost:5000${log.evidence}`}
+                                                src={`${import.meta.env.VITE_BACKEND_URL}${log.evidence}`}
                                                 alt={log.type}
                                                 className="w-full h-full object-contain bg-black/50 backdrop-blur-xl group-hover:scale-105 transition-transform duration-500"
                                             />

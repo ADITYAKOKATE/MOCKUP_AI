@@ -5,11 +5,16 @@ const dotenv = require('dotenv');
 
 dotenv.config();
 
+// Explicitly register models
+require('./models/User');
+require('./models/UserProfile');
+require('./models/AIChatHistory');
+
 const app = express();
 
 // Middleware
 app.use(cors({
-    origin: ['http://localhost:5173', 'http://localhost:3000'],
+    origin: process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',') : ['http://localhost:5173', 'http://localhost:3000'],
     credentials: true,
 }));
 app.use(express.json({ limit: '50mb' }));

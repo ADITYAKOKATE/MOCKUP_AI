@@ -145,7 +145,11 @@ export const useProctoring = (sessionId, onViolation, isActive = true, isEnabled
 
             // 1. Log to Backend FIRST and AWAIT completion
             console.log(`[useProctoring] Logging violation: ${type}...`);
-            const response = await fetch(`http://localhost:5000/api/test/session/${sessionId}/log-violation`, {
+            // Remove /api from env if it exists because the path here is /api/test/... 
+            // Wait, my env is http://localhost:5000/api. 
+            // The code uses http://localhost:5000/api/test/...
+            // So `${import.meta.env.VITE_API_BASE_URL}/test/session/${sessionId}/log-violation` should work
+            const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/test/session/${sessionId}/log-violation`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -208,7 +212,7 @@ export const useProctoring = (sessionId, onViolation, isActive = true, isEnabled
         }
 
         try {
-            const response = await fetch('http://localhost:5001/calibrate', {
+            const response = await fetch(`${import.meta.env.VITE_API_PYTHON_URL}/calibrate`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ sessionId, images: frames })
@@ -236,7 +240,7 @@ export const useProctoring = (sessionId, onViolation, isActive = true, isEnabled
         if (!imageSrc) return false;
 
         try {
-            const response = await fetch('http://localhost:5001/analyze-frame', {
+            const response = await fetch(`${import.meta.env.VITE_API_PYTHON_URL}/analyze-frame`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ sessionId, image: imageSrc })

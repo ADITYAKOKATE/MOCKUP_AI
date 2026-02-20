@@ -1,0 +1,15 @@
+FROM ./llmModel/Phi-3-mini-4k-instruct.Q4_0.gguf
+
+TEMPLATE """{{ if .System }}<|system|>
+{{ .System }}<|end|>
+{{ end }}{{ if .Prompt }}<|user|>
+{{ .Prompt }}<|end|>
+{{ end }}<|assistant|>
+{{ .Response }}<|end|>"""
+
+PARAMETER stop "<|end|>"
+PARAMETER stop "<|user|>"
+PARAMETER stop "<|assistant|>"
+PARAMETER num_gpu 99
+PARAMETER num_ctx 2048
+PARAMETER num_predict 256

@@ -17,9 +17,10 @@ import Analysis from "./pages/analysis/Analysis";
 import PerformanceAnalysis from "./pages/analysis/PerformanceAnalysis";
 import AIRecommendationTests from "./pages/aiInsights/AIRecommendationTests";
 
+import ChatPage from "./pages/Assistant/ChatPage";
+
 // Temporary placeholders 
 const MyTestsPlaceholder = () => <div className="p-8">My Tests Page Coming Soon</div>;
-const AITutorPlaceholder = () => <div className="p-8">AI Tutor Page Coming Soon</div>;
 
 import { useAuth } from "./context/AuthContext";
 import { Outlet } from "react-router-dom";
@@ -48,7 +49,7 @@ const AppRoutes = () => {
                     <Route path="analysis" element={<PerformanceAnalysis />} />
                     <Route path="test-analysis" element={<Analysis />} />
                     <Route path="ai-recommendations" element={<AIRecommendationTests />} />
-                    <Route path="ai-tutor" element={<AITutorPlaceholder />} />
+                    <Route path="ai-tutor" element={<ChatPage />} />
                     <Route path="settings" element={<Settings />} />
                 </Route>
 

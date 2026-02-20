@@ -5,6 +5,7 @@ import { analysisService } from './analysis.service';
 import { insightService } from './insight.service';
 import { testSessionService } from './testSession.service';
 import { aiService } from './ai.service';
+import { assistantService, API_PYTHON_URL } from './assistant.service.js';
 
 export const api = {
     ...authService,
@@ -13,6 +14,8 @@ export const api = {
     ...analysisService,
     ...insightService,
     ...testSessionService,
-    ...aiService
+    ...aiService,
+    ...assistantService,
+    API_PYTHON_URL
 };
 

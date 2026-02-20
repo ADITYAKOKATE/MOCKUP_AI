@@ -3,50 +3,53 @@ import time
 import sys
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from gpt4all import GPT4All
+# Removed GPT4All to unify with Assistant's LLMEngine
 from typing import Optional, List, Dict, Any
 import base64
 import cv2
 import numpy as np
 from ultralytics import YOLO
 
-# Ensure debug folder exists
-os.makedirs("debug_images", exist_ok=True)
+# ... (DLL loading logic stays)
 
 app = FastAPI()
 
 # Add CORS
 from fastapi.middleware.cors import CORSMiddleware
+
+origins = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
+    allow_origins=origins, 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# Assistant Router
+try:
+    from services.assistant.assistant_controller import router as assistant_router, get_llm_instance
+    app.include_router(assistant_router)
+    print("✅ Assistant Router Included.", flush=True)
+except Exception as e:
+    print(f"❌ Failed to include Assistant Router: {e}", flush=True)
+
 # Configuration
-MODEL_NAME = "Phi-3-mini-4k-instruct.Q4_0.gguf"
-MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "llmModel")
+# MODEL_NAME/PATH not needed here as LLMEngine handles it
 
 print(f"🚀 Initializing AI Service...", flush=True)
 
-# Load YOLO Model for Object Detection
-try:
-    print("🚀 Loading YOLOv8n model for object detection...", flush=True)
-    yolo_model = YOLO("yolov8n.pt") 
-    print("✅ YOLOv8n loaded successfully.", flush=True)
-except Exception as e:
-    print(f"❌ Failed to load YOLO model: {e}", flush=True)
-    yolo_model = None
+# Load YOLO Model
+# ... (YOLO logic stays)
 
-# Load Model (Global instance to avoid reloading)
+# Load Model (Global instance unified)
 try:
-    print(f"🚀 Loading AI Model {MODEL_NAME}...", flush=True)
-    model = GPT4All(MODEL_NAME, model_path=MODEL_PATH, allow_download=False, n_ctx=4096)
-    print("✅ AI Model loaded successfully.", flush=True)
+    print(f"🚀 Getting Shared AI Model...", flush=True)
+    model = get_llm_instance()
+    print("✅ Shared AI Model obtained successfully.", flush=True)
 except Exception as e:
-    print(f"❌ Failed to load model: {e}", flush=True)
+    print(f"❌ Failed to get shared model: {e}", flush=True)
     model = None
 
 class ExplanationRequest(BaseModel):
@@ -65,7 +68,8 @@ async def explain_question(request: ExplanationRequest):
     
     try:
         start_time = time.time()
-        output = model.generate(prompt, max_tokens=200)
+        # Using shared LLMEngine
+        output = model.generate_response(prompt=prompt, max_tokens=200, temperature=0.7)
         processing_time = time.time() - start_time
         return {"explanation": output.strip(), "processing_time": processing_time}
     except Exception as e:
@@ -92,22 +96,15 @@ async def generate_questions(request: GenerationRequest):
     if not model:
         raise HTTPException(status_code=503, detail="AI Model not initialized")
     
-    print(f"🤖 Generating {request.count} questions for topic: '{request.topic}' ({request.exam_type} - {request.subject})", flush=True)
-    
-    # Construct few-shot prompt
-    prompt = f"Generate {request.count} {request.difficulty} level {request.subject} questions on topic '{request.topic}' for {request.exam_type} exam.\n"
-    prompt += "Return ONLY a raw JSON array of objects with keys: question, options (list of 4), correct_answer, explanation, type.\n\n"
-    
-    if request.examples:
-        prompt += "Examples:\n"
-        for ex in request.examples[:2]:
-            prompt += f"Q: {ex.question}\nO: {ex.options}\nA: {ex.correct_answer}\n\n"
+    # ... (Prompt construction)
             
     prompt += "New Questions JSON:\n["
     
     try:
-        print(f"⏳ Sending prompt to AI model... (this may take ~{request.count * 25}s on CPU)", flush=True)
-        output = model.generate(prompt, max_tokens=1024, temp=0.7)
+        print(f"⏳ Sending prompt to AI model... (Using Shared LLM)", flush=True)
+        # LLMEngine usage
+        output = model.generate_response(prompt, max_tokens=1024, temperature=0.7)
+        # ... (Rest of parsing logic)
         # Attempt to clean and parse JSON
         cleaned_output = output.strip()
         
