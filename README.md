@@ -40,12 +40,36 @@ As more data is generated, the system evolves — refining recommendations, dete
 </p>
 
 
----
-### 📊 Project Presentation
-
-> 📄 [View Full Presentation (PDF)](https://github.com/ADITYAKOKATE/MOCKUP_AI/blob/main/frontend/public/MOCKUP%20AI.pdf)
 
 ---
+
+<div align="center">
+
+## 🎬 Project Resources
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <a href="https://github.com/ADITYAKOKATE/MOCKUP_AI/blob/main/frontend/public/MOCKUP%20AI.pdf">
+        <img src="https://img.shields.io/badge/📄%20View%20Presentation-PDF-FF6B6B?style=for-the-badge&logoColor=white" alt="View PDF Presentation"/>
+      </a>
+      <br/>
+      <sub><b>Full project slides & documentation</b></sub>
+    </td>
+    <td align="center" width="50%">
+      <a href="YOUR_YOUTUBE_LINK_HERE">
+        <img src="https://img.shields.io/badge/🎬%20Live%20Demo-YouTube-FF0000?style=for-the-badge&logo=youtube&logoColor=white" alt="Watch Live Demo"/>
+      </a>
+      <br/>
+      <sub><b>Watch the full live demonstration</b></sub>
+    </td>
+  </tr>
+</table>
+
+</div>
+
+---
+
 ## 🧠 How It Actually Works — System Deep Dive
 
 ### 1. Strength Score Algorithm
