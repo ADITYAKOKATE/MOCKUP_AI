@@ -235,7 +235,7 @@ const Dashboard = () => {
                                 <Brain size={20} className="text-white" />
                             </div>
                             <div className="text-left">
-                                <p className="font-bold text-gray-900">AI Tutor</p>
+                                <p className="font-bold text-gray-900">Luna AI</p>
                                 <p className="text-xs text-gray-600">Get personalized help</p>
                             </div>
                         </button>
