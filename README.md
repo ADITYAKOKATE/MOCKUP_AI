@@ -346,8 +346,8 @@ ExamMentorAi/
 ### Step 1 — Clone
 
 ```bash
-git clone https://github.com/ADITYAKOKATE/ExamMentorAi.git
-cd ExamMentorAi
+git clone https://github.com/ADITYAKOKATE/MOCKUP_AI.git
+cd MOCKUP_AI
 ```
 
 ### Step 2 — Backend Setup
