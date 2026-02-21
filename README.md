@@ -39,8 +39,13 @@ As more data is generated, the system evolves — refining recommendations, dete
   <img src="frontend/public/Screenshot 2026-02-21 172437.png" alt="MockUp AI — Dashboard" width="100%" style="border-radius:12px"/>
 </p>
 
----
 
+---
+### 📊 Project Presentation
+
+> 📄 [View Full Presentation (PDF)](https://github.com/ADITYAKOKATE/MOCKUP_AI/blob/main/frontend/public/MOCKUP%20AI.pdf)
+
+---
 ## 🧠 How It Actually Works — System Deep Dive
 
 ### 1. Strength Score Algorithm
@@ -475,7 +480,19 @@ npm run import:jee-main     # JEE Main questions
 
 ---
 
-## 📄 License
+## � Team — NightShades
+
+| Role | Name |
+|---|---|
+| 👑 **Team Leader** | Aditya Kokate |
+| 🧑‍💻 Member | Prathmesh Bhoir |
+| 🧑‍💻 Member | Ojas Patil |
+| 🧑‍💻 Member | Sawli Sangale |
+| 🧑‍💻 Member | Kiran Padwal |
+
+
+
+## �📄 License
 
 ISC © [Aditya Kokate](https://github.com/ADITYAKOKATE/MOCKUP_AI)
 
