@@ -57,7 +57,7 @@ As more data is generated, the system evolves — refining recommendations, dete
       <sub><b>Full project slides & documentation</b></sub>
     </td>
     <td align="center" width="50%">
-      <a href="YOUR_YOUTUBE_LINK_HERE">
+      <a href="https://youtu.be/UgdFP3KcZvo?si=sTwwFumNjg87-0Kr">
         <img src="https://img.shields.io/badge/🎬%20Live%20Demo-YouTube-FF0000?style=for-the-badge&logo=youtube&logoColor=white" alt="Watch Live Demo"/>
       </a>
       <br/>
